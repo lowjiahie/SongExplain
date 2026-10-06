@@ -1,0 +1,31 @@
+# Fly.io config. Change `app` to a unique name, then follow DEPLOY.md.
+app = "song-explain-CHANGE-ME"
+primary_region = "sin"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+# SQLite lives on this volume, so run exactly ONE machine.
+[mounts]
+  source = "songdata"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

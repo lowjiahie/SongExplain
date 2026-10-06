@@ -1,0 +1,18 @@
+:root { --bg:#fafaf8; --ink:#111; --muted:#7b7b78; --hair:#e3e3df; --accent:#b3321f; }
+@media (prefers-color-scheme: dark) { :root { --bg:#121211; --ink:#f1f1ee; --muted:#8d8d89; --hair:#2a2a28; --accent:#ff7a63; } }
+* { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.75 "Inter","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif }
+header { max-width:760px; margin:0 auto; padding:28px 24px 0; display:flex; flex-wrap:wrap; gap:14px 28px; align-items:baseline; border-bottom:1px solid var(--hair); padding-bottom:18px }
+header a { color:var(--ink); text-underline-offset:4px }
+header .word { font:700 1.25rem "Space Grotesk","Noto Sans SC",sans-serif; text-decoration:none; letter-spacing:-.02em }
+header nav { font:400 .8rem "DM Mono","Noto Sans SC",monospace }
+header .other { margin-left:auto }
+main { max-width:760px; margin:0 auto; padding:10px 24px 100px }
+section { padding-top:40px; border-top:1px solid var(--hair); margin-top:40px }
+section:first-child { border-top:0; margin-top:0 }
+h1 { font:700 clamp(1.9rem,5vw,2.8rem)/1.1 "Space Grotesk","Noto Sans SC",sans-serif; letter-spacing:-.03em; margin:0 0 6px }
+h2 { font:700 1.05rem "Space Grotesk","Noto Sans SC",sans-serif; margin:2em 0 .4em }
+.meta { font:400 .78rem "DM Mono","Noto Sans SC",monospace; color:var(--muted); margin:0 0 1.5em }
+p, li { margin:.6em 0 } ul { padding-left:1.3em }
+a { color:var(--accent) }
+mark { background:transparent; color:var(--accent); font-weight:700 }

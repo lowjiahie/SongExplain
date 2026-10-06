@@ -1,0 +1,16 @@
+{
+  "name": "song-explain",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "dompurify": "^3.4.16",
+    "express": "^4.19.2",
+    "marked": "^18.1.0",
+    "opencc-js": "^1.4.2"
+  }
+}

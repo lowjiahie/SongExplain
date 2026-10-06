@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import * as OpenCC from "opencc-js";
 
 // One SQLite file. Every song, explanation and note belongs to a user, and every query below is
 // scoped by user id — a user can never read or change another user's data.
@@ -108,6 +109,33 @@ CREATE TABLE IF NOT EXISTS reports (
 
 const norm = (s) => String(s).toLowerCase().replace(/[\(\[].*?[\)\]]/g, "").replace(/\s+/g, " ").trim();
 const songKey = (title, artist) => `${norm(title)}|${norm(artist)}`;
+const toCN = OpenCC.Converter({ from: "tw", to: "cn" });
+// The identity the community uses for "the same song". Stronger than the per-user key: simplified/traditional Chinese,
+// punctuation, spacing, "(feat. …)", "- Remastered" and "A & B" all collapse, so trivial spelling differences never split a song.
+const canonPart = (s) => toCN(String(s).toLowerCase()).replace(/[\(\[（【].*?[\)\]）】]/g, "").replace(/[\p{P}\p{S}\s]+/gu, "");
+const canonTitle = (t) => canonPart(String(t).replace(/\s[-–—]\s(remaster|remastered|live|version|ver\.|mono|stereo|single|radio|deluxe|\d{4}).*$/i, ""));
+const canonArtist = (a) => canonPart(String(a).split(/\s*(?:feat\.?|ft\.?|featuring|with|&|\/|,|、|×|\bx\b|\band\b)\s+/i)[0]);
+// The same album art has the same identity however it is sized: Deezer's md5 path, or Apple's path without the size file name.
+export function coverToken(url) {
+  try {
+    const u = new URL(String(url));
+    const dz = u.pathname.match(/\/images\/(?:cover|artist)\/([0-9a-f]{32})/);
+    if (/dzcdn\.net$/i.test(u.hostname) && dz) return "dz:" + dz[1];
+    if (/mzstatic\.com$/i.test(u.hostname)) { const p = u.pathname.split("/"); p.pop(); return p.length > 3 ? "mz:" + p.join("/") : null; }
+  } catch {}
+  return null;
+}
+const albumKeyOf = (album) => (album ? canonPart(String(album).replace(/\s[-–—]\s(single|ep|deluxe.*)$/i, "")) : "");
+const groupKeyOf = (title, artist) => `${canonTitle(title)}|${canonArtist(artist)}`;
+// group_key = who this song is shared with in the community. group_checked = the owner has answered "same song as…?".
+if (!hasCol("songs", "group_key")) db.exec("ALTER TABLE songs ADD COLUMN group_key TEXT");
+if (!hasCol("songs", "group_checked")) db.exec("ALTER TABLE songs ADD COLUMN group_checked INTEGER NOT NULL DEFAULT 0");
+for (const [c, def] of [["cover_token", "TEXT"], ["album_key", "TEXT"], ["linked_note", "TEXT"]]) if (!hasCol("songs", c)) db.exec(`ALTER TABLE songs ADD COLUMN ${c} ${def}`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_songs_group ON songs(group_key)");
+for (const r of db.prepare("SELECT id, cover, album FROM songs WHERE cover_token IS NULL AND album_key IS NULL").all())
+  db.prepare("UPDATE songs SET cover_token = ?, album_key = ? WHERE id = ?").run(coverToken(r.cover), albumKeyOf(r.album), r.id);
+for (const r of db.prepare("SELECT id, title, artist FROM songs WHERE group_key IS NULL").all())
+  db.prepare("UPDATE songs SET group_key = ? WHERE id = ?").run(groupKeyOf(r.title, r.artist), r.id);
 const publicSong = (r) => r && { ...r, user_id: undefined, lyrics: undefined, hasLyrics: !!r.lyrics };
 
 /* ---------- users & sessions ---------- */
@@ -150,9 +178,11 @@ export function upsertSong(userId, { title, artist, album, year, cover, source =
     return getSong(userId, found.id);
   }
   const info = db
-    .prepare("INSERT INTO songs (user_id,key,title,artist,album,year,cover,source,lyrics) VALUES (?,?,?,?,?,?,?,?,?)")
-    .run(userId, key, title, artist, album ?? null, year ?? null, cover ?? null, source, lyrics?.trim() || null);
-  return getSong(userId, Number(info.lastInsertRowid));
+    .prepare("INSERT INTO songs (user_id,key,group_key,cover_token,album_key,title,artist,album,year,cover,source,lyrics) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+    .run(userId, key, groupKeyOf(title, artist), coverToken(cover), albumKeyOf(album), title, artist, album ?? null, year ?? null, cover ?? null, source, lyrics?.trim() || null);
+  const id = Number(info.lastInsertRowid);
+  autoLink(userId, id);
+  return getSong(userId, id);
 }
 
 export const getSong = (userId, id) => publicSong(db.prepare("SELECT * FROM songs WHERE id = ? AND user_id = ?").get(id, userId));
@@ -194,7 +224,14 @@ export const updatePerspective = (userId, id, { body, mood, anchor, isPublic }) 
        WHERE id=? AND song_id IN (SELECT id FROM songs WHERE user_id = ?)`
     )
     .run(body, mood || null, anchor || null, isPublic ? 1 : 0, isPublic ? 1 : 0, id, userId);
-export const deletePerspective = (userId, id) =>
+export const listJournal = (userId) =>
+  db
+    .prepare(
+      `SELECT p.id, p.song_id, p.body, p.mood, p.anchor, p.is_public, p.hidden, p.created_at, p.updated_at, s.title, s.artist, s.cover
+       FROM perspectives p JOIN songs s ON s.id = p.song_id WHERE s.user_id = ? ORDER BY p.id DESC`
+    )
+    .all(userId);
+export const deletePerspective =(userId, id) =>
   db.prepare("DELETE FROM perspectives WHERE id = ? AND song_id IN (SELECT id FROM songs WHERE user_id = ?)").run(id, userId);
 
 // Everything a user owns, for data export.
@@ -261,18 +298,35 @@ export const countPublishedSince = (userId, sinceSql) =>
 
 // Public feelings about the same song (matched by normalized title|artist) written by anyone who has an account.
 // Returns only what is safe to show: text, mood, anchor, date, a display name. Never an email or user id.
-export function listCommunity(userId, songKey, beforeId, limit = 20) {
+export function listCommunity(userId, groupKey, beforeId, limit = 20) {
   const rows = db
     .prepare(
       `SELECT p.id, p.body, p.mood, p.anchor, p.published_at, p.updated_at, u.display_name AS author, (s.user_id = ?) AS mine
        FROM perspectives p
        JOIN songs s ON s.id = p.song_id
        JOIN users u ON u.id = s.user_id
-       WHERE s.key = ? AND p.is_public = 1 AND p.hidden = 0 AND u.display_name IS NOT NULL ${beforeId ? "AND p.id < ?" : ""}
+       WHERE s.group_key = ? AND p.is_public = 1 AND p.hidden = 0 AND u.display_name IS NOT NULL ${beforeId ? "AND p.id < ?" : ""}
        ORDER BY p.id DESC LIMIT ?`
     )
-    .all(...[userId, songKey, ...(beforeId ? [beforeId] : []), limit + 1]);
+    .all(...[userId, groupKey, ...(beforeId ? [beforeId] : []), limit + 1]);
   return { items: rows.slice(0, limit).map((r) => ({ ...r, mine: !!r.mine })), hasMore: rows.length > limit };
+}
+
+// What other people shared about songs that are in MY library (matched by song key). My own posts are not included —
+// they are already in my journal. Returns my copy of the song so each post can link to it.
+export function listCommunityFeed(userId, beforeId, limit = 20) {
+  const rows = db
+    .prepare(
+      `SELECT p.id, p.body, p.mood, p.anchor, p.published_at, u.display_name AS author, m.id AS song_id, m.title, m.artist, m.cover
+       FROM perspectives p
+       JOIN songs s ON s.id = p.song_id
+       JOIN users u ON u.id = s.user_id
+       JOIN songs m ON m.user_id = ? AND m.group_key = s.group_key
+       WHERE s.user_id <> ? AND p.is_public = 1 AND p.hidden = 0 AND u.display_name IS NOT NULL ${beforeId ? "AND p.id < ?" : ""}
+       GROUP BY p.id ORDER BY p.id DESC LIMIT ?`
+    )
+    .all(...[userId, userId, ...(beforeId ? [beforeId] : []), limit + 1]);
+  return { items: rows.slice(0, limit), hasMore: rows.length > limit };
 }
 
 // Report a public perspective. Three different people reporting hides it until a moderator looks.
@@ -390,3 +444,63 @@ export const listFeedback = (onlyNew) =>
 export const countNewFeedback = () => db.prepare("SELECT COUNT(*) AS n FROM feedback WHERE status = 'new'").get().n;
 export const setFeedbackStatus = (id, status) => db.prepare("UPDATE feedback SET status = ? WHERE id = ?").run(status, id);
 export const deleteFeedback = (id) => db.prepare("DELETE FROM feedback WHERE id = ?").run(id);
+
+// Before saving a song: what in MY library is the same song, or looks like it? Same title (any artist spelling) is enough to ask.
+export function findLibraryMatches(userId, { title, artist, album, cover }) {
+  const t = canonTitle(title), gk = groupKeyOf(title, artist), key = songKey(title, artist);
+  const token = coverToken(cover), albumKey = albumKeyOf(album);
+  return db
+    .prepare("SELECT id, key, title, artist, cover, group_key, cover_token, album_key FROM songs WHERE user_id = ? AND substr(group_key, 1, ?) = ? ORDER BY id DESC LIMIT 6")
+    .all(userId, t.length + 1, t + "|")
+    .map((r) => ({
+      id: r.id, title: r.title, artist: r.artist, cover: r.cover,
+      // exact = already in the library under this very name; same = same song, spelled a little differently;
+      // likely = same title and same cover art / album; similar = same title only
+      match: r.key === key ? "exact" : r.group_key === gk ? "same" : (token && r.cover_token === token) || (albumKey && r.album_key === albumKey) ? "likely" : "similar",
+    }));
+}
+
+/* ---------- "is this the same song as…?" ---------- */
+// Other people's versions of the same title that are filed under a different artist spelling (e.g. "PA PUN BAND" vs "怕胖團").
+// Only catalog facts (title, artist, cover) and counts are returned — never anything a user wrote.
+// Same title AND the same cover art (or the same album) is as good as certain: link it straight away, and tell the owner so they can undo it.
+function autoLink(userId, songId) {
+  const r = similarSongs(userId, songId);
+  const strong = r?.suggestions.filter((s) => s.strong) || [];
+  const groups = new Set(strong.map((s) => s.group_key));
+  if (groups.size !== 1) return;
+  const s = strong[0];
+  db.prepare("UPDATE songs SET group_key = ?, group_checked = 1, linked_note = ? WHERE id = ?").run(s.group_key, `${s.title} · ${s.artist}`, songId);
+}
+export function similarSongs(userId, songId) {
+  const mine = db.prepare("SELECT title, group_key, group_checked, cover_token, album_key, linked_note FROM songs WHERE id = ? AND user_id = ?").get(songId, userId);
+  if (!mine) return null;
+  const t = canonTitle(mine.title);
+  const rows = db
+    .prepare(
+      `SELECT group_key, MIN(title) AS title, MIN(artist) AS artist, MIN(cover) AS cover, COUNT(DISTINCT user_id) AS people,
+         MAX(CASE WHEN (? IS NOT NULL AND cover_token = ?) OR (? <> '' AND album_key = ?) THEN 1 ELSE 0 END) AS strong
+       FROM songs WHERE id <> ? AND group_key <> ? AND substr(group_key, 1, ?) = ?
+       GROUP BY group_key ORDER BY strong DESC, people DESC LIMIT 5`
+    )
+    .all(mine.cover_token, mine.cover_token, mine.album_key || "", mine.album_key || "", songId, mine.group_key, t.length + 1, t + "|");
+  return { checked: !!mine.group_checked, auto: mine.linked_note || null, suggestions: rows.map((r) => ({ ...r, strong: !!r.strong })) };
+}
+// Join another group (only one that really has the same title), or just record "these are different songs" (groupKey = null).
+export function setSongGroup(userId, songId, groupKey) {
+  const mine = db.prepare("SELECT title FROM songs WHERE id = ? AND user_id = ?").get(songId, userId);
+  if (!mine) return { error: "Song not found", status: 404 };
+  if (groupKey) {
+    const ok = db.prepare("SELECT 1 FROM songs WHERE group_key = ? AND id <> ? LIMIT 1").get(groupKey, songId);
+    if (!ok || !String(groupKey).startsWith(canonTitle(mine.title) + "|")) return { error: "That isn't the same title.", status: 400 };
+    db.prepare("UPDATE songs SET group_key = ?, group_checked = 1, linked_note = NULL WHERE id = ?").run(groupKey, songId);
+  } else {
+    db.prepare("UPDATE songs SET group_checked = 1 WHERE id = ?").run(songId);
+  }
+  return { ok: true };
+}
+// Back to this song's own identity (undo a link).
+export const resetSongGroup = (userId, songId) =>
+  db.prepare("UPDATE songs SET group_key = ?, group_checked = 1, linked_note = NULL WHERE id = ? AND user_id = ?").run(
+    ...(() => { const r = db.prepare("SELECT title, artist FROM songs WHERE id = ? AND user_id = ?").get(songId, userId); return [r ? groupKeyOf(r.title, r.artist) : null, songId, userId]; })()
+  );

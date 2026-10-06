@@ -385,7 +385,7 @@ document.addEventListener("click", async (e) => {
     } else if (act === "mhide-post") {
       if (!confirm("Hide this post from the community feed?")) return;
       await json("POST", `/api/admin/perspectives/${el.dataset.id}/hide`, {});
-      COMM.items = COMM.items.filter((p) => p.id !== Number(el.dataset.id)); if (curSong) renderCommunity(curSong); toast("Hidden");
+      COMM.items = COMM.items.filter((p) => p.id !== Number(el.dataset.id)); if (curSong && $("community")) renderCommunity(curSong); if ($("jlist")) journalDrop?.(Number(el.dataset.id)); toast("Hidden");
     }
     else if (act === "retest") {
       el.disabled = true; el.textContent = "Testing…";
@@ -447,11 +447,36 @@ document.addEventListener("error", (e) => {
 function openAdd(title = "") { $("mt").value = title; $("adddlg").showModal(); $("mt").focus(); }
 $("madd").onclick = async () => {
   try {
-    const s = await json("POST", "/api/songs", { title: $("mt").value, artist: $("ma").value, lyrics: $("ml").value, source: "manual" });
+    const s = await saveSong({ title: $("mt").value, artist: $("ma").value, lyrics: $("ml").value, source: "manual" });
+    if (!s) return; // cancelled, or the person chose a song they already have
     $("adddlg").close(); $("mt").value = $("ma").value = $("ml").value = "";
     location.hash = "#/song/" + s.id;
   } catch (e) { toast(e.message, "err"); }
 };
+
+// Every way of putting a song in the library goes through here. If the library already holds the same song (or one that
+// looks like it), the person decides — open the one they have, or confirm it is a different song. Resolves to the saved
+// song, or null when nothing new was saved (the existing one was opened, or they cancelled).
+let dupResolve = null;
+async function saveSong(payload) {
+  const { matches } = await json("POST", "/api/songs/check", payload);
+  const exact = matches.find((m) => m.match === "exact");
+  if (exact) { toast("Already in your library"); location.hash = "#/song/" + exact.id; $("adddlg").close(); return null; }
+  if (!matches.length) return json("POST", "/api/songs", payload);
+  const why = { same: "Looks like the same song", likely: "Same title and cover art", similar: "Same title, different artist" };
+  $("dupnote").textContent = `You already have ${matches.length > 1 ? "songs" : "a song"} called “${payload.title}”. Is it the same one? Saving it again would split your notes and feelings across two copies.`;
+  $("duplist").innerHTML = matches.map((m) => `<div class="simrow">${m.cover ? `<img src="${esc(m.cover)}" alt="" loading="lazy">` : ""}<span><b>${esc(m.title)}</b> · ${esc(m.artist)} <span class="mono">${why[m.match]}</span></span><button class="btn ghost" data-dup-open="${m.id}">It’s this one — open it</button></div>`).join("");
+  $("dupdlg").showModal();
+  const choice = await new Promise((resolve) => { dupResolve = resolve; });
+  $("dupdlg").close();
+  if (choice === "new") return json("POST", "/api/songs", payload);
+  if (choice?.open) { $("adddlg").close(); location.hash = "#/song/" + choice.open; }
+  return null;
+}
+$("dupdlg").addEventListener("click", (e) => { const b = e.target.closest("[data-dup-open]"); if (b) dupResolve?.({ open: b.dataset.dupOpen }); });
+$("dupnew").onclick = () => dupResolve?.("new");
+$("dupcancel").onclick = () => dupResolve?.(null);
+$("dupdlg").addEventListener("cancel", () => dupResolve?.(null));
 
 /* ---------- Home: search results + library ---------- */
 async function renderHome() {
@@ -468,7 +493,8 @@ async function renderHome() {
       </form>
       <p class="hint">Try: a song title and artist — or a youtube.com link.</p>
     </section>
-    <span class="lab" style="margin-bottom:26px">Library <span id="libcount"></span></span>
+    <div class="libhead"><span class="lab">Library <span id="libcount"></span></span><button class="btn ghost" data-act="add">+ Add a song</button></div>
+    <div class="libfilter" id="libfilter" hidden><input id="libq" type="text" placeholder="Filter your library by title or artist" autocomplete="off" aria-label="Filter your library"><button class="link" id="libclear" hidden>clear</button></div>
     <div id="lib" class="masonry"></div>
   </div>`;
   bindSearchForm();
@@ -478,16 +504,138 @@ async function renderHome() {
     if (!$("lib")) return;
     $("libcount").textContent = songs.length ? `(${songs.length})` : "";
     if (!songs.length) { $("lib").className = ""; $("lib").innerHTML = `<div class="empty"><p>Nothing here yet.</p><p class="mono">Search for a song above. Every song you open is kept in this library.</p></div>`; return; }
-    songs.forEach((s) => {
-      const b = document.createElement("button");
-      b.className = "item";
-      const label = s.explanations ? "Explained" : s.perspectives ? "Notes" : "Song";
-      b.innerHTML = `${coverHTML(s)}<span class="lab">${label}${s.perspectives ? ` · ${s.perspectives} ${s.perspectives > 1 ? "notes" : "note"}` : ""}</span>
-        <h3>${esc(s.title)}</h3><div class="by">${esc(s.artist)}</div>${s.excerpt ? `<p class="ex">${esc(s.excerpt)}</p>` : ""}<span class="more">Read More.</span>`;
-      b.onclick = () => (location.hash = "#/song/" + s.id);
-      $("lib").append(b);
-    });
+    // Filtering the library is separate from searching for new songs: it only looks at songs you already have.
+    const draw = (list) => {
+      $("lib").innerHTML = "";
+      if (!list.length) { $("lib").className = ""; $("lib").innerHTML = `<div class="empty"><p>No song in your library matches.</p><p class="mono">Press Enter in the big search box to look for it as a new song.</p></div>`; return; }
+      $("lib").className = "masonry";
+      list.forEach((s) => {
+        const b = document.createElement("button");
+        b.className = "item";
+        const label = s.explanations ? "Explained" : s.perspectives ? "Notes" : "Song";
+        b.innerHTML = `${coverHTML(s)}<span class="lab">${label}${s.perspectives ? ` · ${s.perspectives} ${s.perspectives > 1 ? "notes" : "note"}` : ""}</span>
+          <h3>${esc(s.title)}</h3><div class="by">${esc(s.artist)}</div>${s.excerpt ? `<p class="ex">${esc(s.excerpt)}</p>` : ""}<span class="more">Read More.</span>`;
+        b.onclick = () => (location.hash = "#/song/" + s.id);
+        $("lib").append(b);
+      });
+    };
+    const fold = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const apply = () => {
+      const q = fold($("libq").value.trim());
+      $("libclear").hidden = !q;
+      const list = q ? songs.filter((s) => fold(`${s.title} ${s.artist} ${s.album || ""}`).includes(q)) : songs;
+      $("libcount").textContent = q ? `(${list.length} of ${songs.length})` : `(${songs.length})`;
+      draw(list);
+    };
+    $("libfilter").hidden = false;
+    $("libq").oninput = apply;
+    $("libq").onkeydown = (e) => { if (e.key === "Escape") { $("libq").value = ""; apply(); } };
+    $("libclear").onclick = () => { $("libq").value = ""; apply(); $("libq").focus(); };
+    draw(songs);
   } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---------- Journal: what I wrote, and what others shared about the songs in my library ---------- */
+let journalTab = "mine";
+let journalDrop = null; // lets a moderator "hide" action remove a post from the open journal
+async function renderJournal() {
+  $("navjournal").classList.add("on");
+  $("view").innerHTML = `<div class="fade">
+    <span class="lab">Journal <span id="jcount"></span></span>
+    <h1 class="jtitle">Your songs, in your words.</h1>
+    <p class="jintro">A diary of what songs have meant to you — and what other people here felt about the same songs.</p>
+    <div class="seg jseg" role="group" aria-label="Journal view">
+      <button data-jt="mine" aria-pressed="true">My feelings <span id="jn-mine"></span></button>
+      <button data-jt="comm" aria-pressed="false">From the community <span id="jn-comm"></span></button>
+    </div>
+    <p class="note" id="jhelp"></p>
+    <div class="jwrite" id="jwrite" hidden></div>
+    <div class="jtools"><input id="jq" type="text" placeholder="Search" autocomplete="off" aria-label="Search the journal"><select id="jsong" aria-label="Show one song only"></select><button class="link" id="jclear" hidden>clear filters</button></div>
+    <div class="moods" id="jtags"></div>
+    <div id="jlist"><p class="note">Loading…</p></div>
+    <div id="jmore"></div>
+  </div>`;
+  let songs = [], rows = [], comm = [], hasMore = false;
+  try {
+    [songs, rows] = await Promise.all([json("GET", "/api/songs"), json("GET", "/api/journal")]);
+    const c = await json("GET", "/api/journal/community").catch(() => ({ items: [], hasMore: false }));
+    comm = c.items; hasMore = c.hasMore;
+  } catch (e) { toast(e.message, "err"); return; }
+  if (!$("jlist")) return;
+  const fold = (x) => String(x || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  let tag = "", songId = "";
+  journalDrop = (id) => { comm = comm.filter((p) => p.id !== id); if ($("jlist")) paint(); };
+
+  const items = () => (journalTab === "mine" ? rows : comm);
+  const matches = (r) =>
+    (!tag || parseTags(r.mood).includes(tag)) && (!songId || String(r.song_id) === songId) &&
+    (!$("jq").value.trim() || fold(`${r.body} ${r.title} ${r.artist} ${r.mood} ${r.anchor || ""} ${r.author || ""}`).includes(fold($("jq").value.trim())));
+
+  // Start a new feeling: pick one of the songs in the library, jump straight to its "My feelings" tab.
+  const writeBox = () => {
+    const box = $("jwrite");
+    box.hidden = journalTab !== "mine";
+    if (box.hidden) return;
+    box.innerHTML = songs.length
+      ? `<label for="wsong">Write a new feeling about</label><select id="wsong">${songs.map((s) => `<option value="${s.id}">${esc(s.title)} — ${esc(s.artist)}</option>`).join("")}</select><button class="btn" id="wgo">Write</button>`
+      : `<span>Your library is empty. Add a song first, then come back to write about it.</span><button class="btn" data-act="add">Add a song</button>`;
+    if ($("wgo")) $("wgo").onclick = () => { curTab = "notes"; location.hash = "#/song/" + $("wsong").value; };
+  };
+  const filters = () => {
+    const list = items();
+    const counts = new Map();
+    list.forEach((r) => parseTags(r.mood).forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
+    if (tag && !counts.has(tag)) tag = "";
+    $("jtags").innerHTML = [...counts.entries()].sort((x, y) => y[1] - x[1]).map(([t, n]) => `<button type="button" class="mood" data-mood="${esc(t)}" aria-pressed="${t === tag}">${esc(t)} <span class="mono">${n}</span></button>`).join("");
+    const seen = new Map();
+    list.forEach((r) => seen.set(String(r.song_id), `${r.title} — ${r.artist}`));
+    if (songId && !seen.has(songId)) songId = "";
+    $("jsong").innerHTML = `<option value="">All songs (${seen.size})</option>` + [...seen.entries()].map(([id, t]) => `<option value="${id}"${id === songId ? " selected" : ""}>${esc(t)}</option>`).join("");
+    $("jsong").hidden = seen.size < 2;
+  };
+  const entry = (r) => journalTab === "mine"
+    ? `<article class="entry">${entryHTML({
+        head: `<a href="#/song/${r.song_id}"><b>${esc(r.title)}</b> <span class="by">${esc(r.artist)}</span></a>`,
+        body: r.body, mood: r.mood, anchor: r.anchor, date: fmtDate(r.created_at) + (r.updated_at ? " · edited" : ""),
+        badge: r.is_public ? (r.hidden ? ["Hidden by a moderator", "warn"] : ["Shared with the community", "shared"]) : ["Only you can see this", ""],
+        actions: `<a class="link" href="#/song/${r.song_id}">open song</a>`,
+      })}</article>`
+    : `<article class="entry">${entryHTML({
+        head: `<a href="#/song/${r.song_id}"><b>${esc(r.title)}</b> <span class="by">${esc(r.artist)}</span></a><span class="by">shared by <b>${esc(r.author)}</b></span>`,
+        body: r.body, mood: r.mood, anchor: r.anchor, date: fmtDate(r.published_at),
+        actions: `<button class="link" data-act="report" data-id="${r.id}">report</button>${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${r.id}">hide</button>` : ""}`,
+      })}</article>`;
+
+  const empty = (filtered) => {
+    if (filtered) return `<div class="empty"><p>Nothing matches those filters.</p><p class="mono">Try a different word, or clear the filters.</p></div>`;
+    if (journalTab === "mine") return `<div class="empty"><p>Your journal is empty — and that’s a good place to start.</p><p class="mono">Choose a song above and write one line. Even a single word counts. Only you will see it unless you choose to share.</p></div>`;
+    if (!songs.length) return `<div class="empty"><p>This page shows what other people felt about songs <i>you</i> have.</p><p class="mono">Your library is empty, so there is nothing to match yet. Add a song to begin.</p></div>`;
+    return `<div class="empty"><p>No one has shared a feeling about your songs yet.</p><p class="mono">Posts appear here only for songs in your library. Add more songs to see more — or be the first: write a feeling and tick “Share”.</p></div>`;
+  };
+  const paint = () => {
+    $("jn-mine").textContent = rows.length ? `(${rows.length})` : "";
+    $("jn-comm").textContent = comm.length ? `(${comm.length}${hasMore ? "+" : ""})` : "";
+    document.querySelectorAll("[data-jt]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.jt === journalTab)));
+    $("jhelp").textContent = journalTab === "mine"
+      ? "Everything you have written, newest first. Tap a word to filter by it. Only you can see the ones marked private."
+      : "What other people chose to share — only for songs that are in your library. Be kind; you can report anything that isn’t.";
+    writeBox(); filters();
+    const list = items().filter(matches);
+    const filtered = !!(tag || songId || $("jq").value.trim());
+    $("jclear").hidden = !filtered;
+    $("jcount").textContent = filtered ? `(${list.length} of ${items().length})` : "";
+    $("jlist").innerHTML = list.length ? list.map(entry).join("") : empty(filtered && items().length > 0);
+    $("jmore").innerHTML = journalTab === "comm" && hasMore && !filtered ? `<div class="row" style="margin-top:22px"><button class="btn ghost" id="jmorebtn">Show more</button></div>` : "";
+    if ($("jmorebtn")) $("jmorebtn").onclick = async () => {
+      try { const c = await json("GET", `/api/journal/community?before=${comm[comm.length - 1].id}`); comm = comm.concat(c.items); hasMore = c.hasMore; paint(); } catch (e) { toast(e.message, "err"); }
+    };
+  };
+  document.querySelectorAll("[data-jt]").forEach((b) => (b.onclick = () => { journalTab = b.dataset.jt; tag = ""; songId = ""; $("jq").value = ""; paint(); }));
+  $("jtags").onclick = (e) => { const b = e.target.closest(".mood"); if (!b) return; tag = tag === b.dataset.mood ? "" : b.dataset.mood; paint(); };
+  $("jsong").onchange = () => { songId = $("jsong").value; paint(); };
+  $("jq").oninput = paint;
+  $("jclear").onclick = () => { tag = ""; songId = ""; $("jq").value = ""; paint(); };
+  paint();
 }
 
 // Searching has its own page (#/search/<query>), so results never get mixed up with your library.
@@ -569,7 +717,7 @@ function renderCandidates() {
     const b = document.createElement("button");
     b.className = "item fade";
     b.innerHTML = `${coverHTML(c)}<span class="lab">Match</span><h3>${esc(c.title)}</h3><div class="by">${esc(c.artist)}${c.year ? " · " + esc(c.year) : ""}</div><span class="more">Open.</span>`;
-    b.onclick = async () => { try { const s = await json("POST", "/api/songs", c); location.hash = "#/song/" + s.id; } catch (e) { toast(e.message, "err"); } };
+    b.onclick = async () => { try { const s = await saveSong(c); if (s) location.hash = "#/song/" + s.id; } catch (e) { toast(e.message, "err"); } };
     box.append(b);
   });
   const pager = $("cpager");
@@ -598,9 +746,47 @@ function setLang(l) {
   curLang = l; store.set("lang", l);
   document.querySelectorAll("#langseg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === l)));
 }
+/* ---------- my feelings: free-form feeling words ---------- */
+// A feeling can carry up to 5 words. The suggested ones are only a starting point: type anything, in any language.
+const MAX_TAGS = 5, MAX_TAG_LEN = 24;
+const PROMPTS = ["This song reminds me of…", "The first time I heard it, I was…", "The line that hits me most is… because…", "If I could tell the singer one thing…", "Right now this song feels like…"];
+let TAG_POOL = []; // words I used on earlier feelings, offered again as chips
+const parseTags = (m) => String(m || "").split(",").map((t) => t.trim()).filter(Boolean);
+const getTags = () => parseTags($("pmood").value);
+// One layout for every feeling (mine, the community's, the journal): who/which song → what they wrote → feeling words → small print.
+function entryHTML({ head = "", body, mood, anchor, date, badge, actions = "" }) {
+  const tags = parseTags(mood);
+  return `${head ? `<div class="e-head">${head}</div>` : ""}
+    <p class="e-body">${esc(body)}</p>
+    ${tags.length ? `<div class="e-tags" aria-label="Feeling words">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+    <div class="e-foot">${anchor ? `<span>About: ${esc(anchor)}</span>` : ""}<span>${esc(date)}</span>${badge ? `<span class="badge ${badge[1]}">${esc(badge[0])}</span>` : ""}<span class="push">${actions}</span></div>`;
+}
 function setMood(m) {
-  $("pmood").value = m || "";
-  document.querySelectorAll(".mood").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mood === m)));
+  $("pmood").value = parseTags(m).slice(0, MAX_TAGS).join(",");
+  const sel = getTags();
+  const all = [...new Set([...sel, ...MOODS, ...TAG_POOL])];
+  $("moods").innerHTML = all.map((t) => `<button type="button" class="mood" data-mood="${esc(t)}" aria-pressed="${sel.includes(t)}">${esc(t)}</button>`).join("");
+  $("tagcount").textContent = `${sel.length}/${MAX_TAGS}`;
+}
+function toggleTag(t) {
+  const sel = getTags();
+  if (sel.includes(t)) return setMood(sel.filter((x) => x !== t).join(","));
+  if (sel.length >= MAX_TAGS) return toast(`Up to ${MAX_TAGS} words per feeling`, "err");
+  setMood([...sel, t].join(","));
+}
+function addCustomTags() {
+  const raw = $("ptag").value;
+  $("ptag").value = "";
+  parseTags(raw.replace(/[，、;；]/g, ",")).forEach((t) => { t = t.replace(/\s+/g, " ").slice(0, MAX_TAG_LEN); if (!getTags().includes(t)) toggleTag(t); });
+}
+async function loadTagPool() {
+  try {
+    const rows = await json("GET", "/api/journal");
+    const n = new Map();
+    rows.forEach((r) => parseTags(r.mood).forEach((t) => n.set(t, (n.get(t) || 0) + 1)));
+    TAG_POOL = [...n.entries()].filter(([t]) => !MOODS.includes(t)).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([t]) => t);
+    if ($("moods")) setMood($("pmood").value);
+  } catch {}
 }
 
 async function renderSong(id) {
@@ -624,8 +810,11 @@ async function renderSong(id) {
           <dt>Lyrics</dt><dd>${song.hasLyrics ? "saved on this computer, private" : "not saved yet"}</dd>
         </dl>
         <div class="row"><button class="btn ghost" id="cardbtn">Make a lyric card</button><button class="link danger" id="delsong">Delete song</button></div>
+        <div class="row" style="margin-top:6px"><button class="link" id="simbtn">Same song, different spelling?</button></div>
       </div>
     </header>
+
+    <div id="simbox"></div>
 
     <div class="tabs"><nav class="nav" role="tablist" aria-label="Song sections">
       <button role="tab" class="tab" data-tab="explain">Explanation${explanations.length ? ` (${explanations.length})` : ""}</button>
@@ -659,9 +848,11 @@ async function renderSong(id) {
     <section class="panel col" id="p-notes" hidden>
       <span class="lab">How does this song make you feel?</span>
       <input type="hidden" id="pmood">
-      <div class="moods">${MOODS.map((m) => `<button type="button" class="mood" data-mood="${m}" aria-pressed="false">${m}</button>`).join("")}</div>
+      <div class="moods" id="moods"></div>
+      <div class="tagadd"><input id="ptag" type="text" maxlength="40" placeholder="Add your own word — e.g. bittersweet, 想家, rainy bus ride" autocomplete="off" aria-label="Add your own feeling word"><button type="button" class="link" id="ptagadd">add</button><span class="mono note" id="tagcount" style="margin:0"></span></div>
       <div class="field"><input id="panchor" type="text" placeholder="About which part? e.g. Chorus, Verse 2 (optional)"></div>
-      <div class="field"><textarea id="pbody" placeholder="A memory, a person, a moment in your life this song brings back…"></textarea></div>
+      <div class="field"><textarea id="pbody" placeholder="Anything at all — a memory, a person, a moment, or just one word. Your own words, not the song's."></textarea></div>
+      <div class="prompts"><span class="mono">Not sure where to start?</span>${PROMPTS.map((t) => `<button type="button" class="link" data-prompt="${esc(t)}">${esc(t)}</button>`).join("")}</div>
       <label class="check"><input type="checkbox" id="ppublic"><span><b>Share this with the other people on this app</b>, under your display name. Don't include personal details. No links, and please don't paste lyrics. You can make it private again any time.</span></label>
       <div class="row" style="margin-top:14px"><button class="btn" id="padd">Save my feeling</button><button class="btn ghost" id="pcancel" hidden>Cancel</button><span id="pstat" class="note" style="margin:0"></span></div>
       <div id="plist"></div>
@@ -680,7 +871,16 @@ async function renderSong(id) {
   document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
   setLang(curLang);
   document.querySelectorAll("#langseg button").forEach((b) => (b.onclick = () => setLang(b.dataset.lang)));
-  document.querySelectorAll(".mood").forEach((b) => (b.onclick = () => setMood($("pmood").value === b.dataset.mood ? "" : b.dataset.mood)));
+  setMood("");
+  loadTagPool();
+  $("moods").onclick = (e) => { const b = e.target.closest(".mood"); if (b) toggleTag(b.dataset.mood); };
+  $("ptagadd").onclick = addCustomTags;
+  $("ptag").onkeydown = (e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addCustomTags(); } };
+  document.querySelector(".prompts").onclick = (e) => {
+    const b = e.target.closest("[data-prompt]"); if (!b) return;
+    const t = $("pbody"); t.value = t.value.trim() ? t.value.replace(/\s+$/, "") + "\n\n" + b.dataset.prompt + " " : b.dataset.prompt + " ";
+    t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+  };
 
   $("cardbtn").onclick = () => openCard(song);
   $("delsong").onclick = async () => { if (confirm("Delete this song and everything you saved for it?")) { await json("DELETE", "/api/songs/" + id); toast("Song deleted"); location.hash = "#/"; } };
@@ -696,6 +896,8 @@ async function renderSong(id) {
   };
 
   loadViews(song);
+  $("simbtn").onclick = () => checkSimilar(song, true);
+  checkSimilar(song, false);
 
   // saved explanations: newest in full, older versions folded away
   const exCard = (e) => `
@@ -711,9 +913,11 @@ async function renderSong(id) {
   perspectives.forEach((p) => {
     const el = document.createElement("article");
     el.className = "entry";
-    el.innerHTML = `<div class="meta">${p.mood ? `<span>${esc(p.mood)}</span>` : ""}${p.anchor ? `<span>${esc(p.anchor)}</span>` : ""}<span>${esc(fmtDate(p.created_at))}${p.updated_at ? " · edited" : ""}</span><span>${p.is_public ? (p.hidden ? "shared · hidden by a moderator" : "shared with the community") : "private"}</span>
-      <span class="push"><button class="link" data-vis>${p.is_public ? "make private" : "share"}</button> <button class="link" data-edit>edit</button> <button class="link danger" data-del>delete</button></span></div>
-      <p>${esc(p.body)}</p>`;
+    el.innerHTML = entryHTML({
+      body: p.body, mood: p.mood, anchor: p.anchor, date: fmtDate(p.created_at) + (p.updated_at ? " · edited" : ""),
+      badge: p.is_public ? (p.hidden ? ["Hidden by a moderator", "warn"] : ["Shared with the community", "shared"]) : ["Only you can see this", ""],
+      actions: `<button class="link" data-vis>${p.is_public ? "make private" : "share"}</button><button class="link" data-edit>edit</button><button class="link danger" data-del>delete</button>`,
+    });
     el.querySelector("[data-del]").onclick = async () => { if (confirm("Delete this feeling?")) { await json("DELETE", "/api/perspectives/" + p.id); renderSong(id); } };
     el.querySelector("[data-vis]").onclick = async () => {
       try {
@@ -733,6 +937,41 @@ async function renderSong(id) {
     };
     $("plist").append(el);
   });
+}
+
+/* ---------- one song, one community ---------- */
+// The same song can be filed under different artist spellings (e.g. "PA PUN BAND" / "怕胖團"). Ask once, and let the person link them.
+async function checkSimilar(song, force) {
+  let r;
+  try { r = await json("GET", `/api/songs/${song.id}/similar`); } catch { return; }
+  const box = $("simbox");
+  if (!box || curSong?.id !== song.id) return;
+  if (r.auto && !force) {
+    box.innerHTML = `<div class="simbox"><b>Linked automatically</b><p>“${esc(song.title)}” matched ${esc(r.auto)} — same title and same cover art — so you share one community. If that is wrong, you can unlink it.</p><button class="link" data-sim="reset">Unlink</button> <button class="link" data-sim-ok>OK</button></div>`;
+    box.onclick = async (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      try {
+        if (b.dataset.sim === "reset") { await json("POST", `/api/songs/${song.id}/group`, { groupKey: "reset" }); COMM.loaded = false; toast("Unlinked"); if (curTab === "community") loadCommunity(song); }
+        box.innerHTML = "";
+      } catch (err) { toast(err.message, "err"); }
+    };
+    return;
+  }
+  if (!force && (r.checked || !r.suggestions.length)) { box.innerHTML = ""; return; }
+  if (!r.suggestions.length) { box.innerHTML = `<div class="simbox"><p>No other version of “${esc(song.title)}” was found under a different name. You are already sharing with everyone who has this song.</p><button class="link" data-sim-close>close</button></div>`; box.onclick = () => (box.innerHTML = ""); return; }
+  box.innerHTML = `<div class="simbox"><b>Is this the same song?</b>
+    <p>Other people here have “${esc(song.title)}” saved under a different artist name. If it is the same song, link them — you will share one community and see each other’s feelings.</p>
+    ${r.suggestions.map((x) => `<div class="simrow">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : ""}<span><b>${esc(x.title)}</b> · ${esc(x.artist)} <span class="mono">${x.people} ${x.people > 1 ? "people" : "person"}${x.strong ? " · same cover art" : ""}</span></span><button class="btn ghost" data-sim="${esc(x.group_key)}">Yes, same song</button></div>`).join("")}
+    <button class="link" data-sim="">No, it’s a different song</button></div>`;
+  box.onclick = async (e) => {
+    const b = e.target.closest("[data-sim]"); if (!b) return;
+    try {
+      await json("POST", `/api/songs/${song.id}/group`, { groupKey: b.dataset.sim || null });
+      box.innerHTML = ""; COMM.loaded = false;
+      toast(b.dataset.sim ? "Linked — you now share one community" : "Got it");
+      if (b.dataset.sim && curTab === "community") loadCommunity(song);
+    } catch (err) { toast(err.message, "err"); }
+  };
 }
 
 /* ---------- Community: feelings other people on this app chose to share ---------- */
@@ -760,9 +999,11 @@ function renderCommunity(song) {
     box.innerHTML = `<div class="empty" style="margin-top:18px"><p>No one has shared a feeling about this song yet.</p><p class="mono">Write one in “My feelings” and tick “Share” — you could be the first.</p></div>`;
     return;
   }
-  box.innerHTML = COMM.items.map((p) => `<article class="entry"><div class="meta"><span>${esc(p.author)}${p.mine ? " (you)" : ""}</span>${p.mood ? `<span>${esc(p.mood)}</span>` : ""}${p.anchor ? `<span>${esc(p.anchor)}</span>` : ""}<span>${esc(fmtDate(p.published_at))}</span>
-      <span class="push">${p.mine ? "" : `<button class="link" data-act="report" data-id="${p.id}">report</button>`}${me?.isAdmin ? ` <button class="link danger" data-act="mhide-post" data-id="${p.id}">hide</button>` : ""}</span></div>
-      <p>${esc(p.body)}</p></article>`).join("") +
+  box.innerHTML = COMM.items.map((p) => `<article class="entry">${entryHTML({
+      head: `<b>${esc(p.author)}</b>${p.mine ? ` <span class="you">you</span>` : ""}`,
+      body: p.body, mood: p.mood, anchor: p.anchor, date: fmtDate(p.published_at),
+      actions: `${p.mine ? "" : `<button class="link" data-act="report" data-id="${p.id}">report</button>`}${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${p.id}">hide</button>` : ""}`,
+    })}</article>`).join("") +
     (COMM.hasMore ? `<div class="row" style="margin-top:22px"><button class="btn ghost" id="commmore">Show more</button></div>` : "");
   if ($("commmore")) $("commmore").onclick = () => loadCommunity(song, true);
 }
@@ -1429,6 +1670,8 @@ function route() {
   if (ctrl) ctrl.abort(); // leaving the page cancels a running explanation
   if (vctrl) vctrl.abort();
   window.scrollTo(0, 0);
+  document.querySelectorAll(".navl a").forEach((x) => x.classList.remove("on"));
+  if (location.hash === "#/journal") { curTab = "explain"; renderJournal(); return; }
   const sm = location.hash.match(/^#\/search\/(.+)$/);
   if (sm) { curTab = "explain"; let q = sm[1]; try { q = decodeURIComponent(q); } catch {} renderSearch(q); return; }
   const m = location.hash.match(/^#\/song\/(\d+)/);

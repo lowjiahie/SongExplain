@@ -308,6 +308,22 @@ app.get("/api/songs/:id", (req, res) => {
   res.json({ song, explanations: db.listExplanations(song.id), perspectives: db.listPerspectives(song.id) });
 });
 
+// "Is this the same song as another version?" — keeps one song from splitting the community across spellings.
+// Called before saving: is this already in (or very close to something in) my library?
+app.post("/api/songs/check", (req, res) => {
+  const { title, artist, album, cover } = req.body || {};
+  if (!String(title || "").trim()) return res.json({ matches: [] });
+  res.json({ matches: db.findLibraryMatches(req.user.id, { title: String(title), artist: String(artist || ""), album, cover: safeCover(cover) }) });
+});
+app.get("/api/songs/:id/similar", viewsLimit, (req, res) => {
+  const r = db.similarSongs(req.user.id, idOf(req));
+  r ? res.json(r) : bad(res, "Song not found", 404);
+});
+app.post("/api/songs/:id/group", (req, res) => {
+  const k = req.body?.groupKey;
+  const r = k === "reset" ? (db.resetSongGroup(req.user.id, idOf(req)), { ok: true }) : db.setSongGroup(req.user.id, idOf(req), k ? String(k) : null);
+  r.error ? bad(res, r.error, r.status) : res.json({ ok: true });
+});
 app.put("/api/songs/:id/lyrics", (req, res) => {
   if (!db.getSong(req.user.id, idOf(req))) return bad(res, "Song not found", 404);
   const lyrics = String(req.body?.lyrics || "");
@@ -522,14 +538,20 @@ const publishLimit = auth.rateLimit({ windowMs: 60 * 60_000, max: 30, by: "user"
 const REPORT_REASONS = ["spam", "harassment", "personal-info", "lyrics", "other"];
 
 // My own perspectives (notes) on a song. Private by default; sharing is an explicit choice per post.
+// "mood" holds up to 5 feeling words, comma-separated. They can be anything the person types, not just the suggested ones.
+const MAX_TAGS = 5, MAX_TAG_LEN = 24;
+const cleanTags = (raw) =>
+  [...new Set(String(Array.isArray(raw) ? raw.join(",") : raw || "").split(/[,，、;；\n]/).map((t) => t.trim().replace(/\s+/g, " ").slice(0, MAX_TAG_LEN)).filter(Boolean))]
+    .slice(0, MAX_TAGS).join(",");
 const perspectiveInput = (req, res) => {
   const body = String(req.body?.body || "").trim();
   if (body.length < 2 || body.length > 5000) return bad(res, "Write between 2 and 5000 characters"), null;
-  return { body, mood: String(req.body?.mood || "").slice(0, 40), anchor: String(req.body?.anchor || "").slice(0, 60), isPublic: req.body?.isPublic === true };
+  return { body, mood: cleanTags(req.body?.mood), anchor: String(req.body?.anchor || "").slice(0, 60), isPublic: req.body?.isPublic === true };
 };
 // Returns true if sharing must stop here (the response has been sent).
 function sharingBlocked(req, res, songId, p, alreadyPublished) {
   if (!p.isPublic) return false;
+  if (/https?:|www\./i.test(`${p.mood} ${p.anchor}`)) return bad(res, "Links aren't allowed in shared feelings."), true;
   const problem = publicProblem(req.user, songId, p.body);
   if (problem) return res.status(problem.code === "NEED_NAME" ? 409 : 400).json({ error: problem.msg, code: problem.code }), true;
   if (!alreadyPublished && publishedToday(req.user.id) >= MAX_PUBLIC_PER_DAY)
@@ -551,13 +573,16 @@ app.put("/api/perspectives/:id", publishLimit, (req, res) => {
   db.updatePerspective(req.user.id, idOf(req), p);
   res.json({ ok: true });
 });
+// Everything I have written, across all songs (the "Journal" page). Only ever my own rows.
+app.get("/api/journal", (req, res) => res.json(db.listJournal(req.user.id)));
+app.get("/api/journal/community", viewsLimit, (req, res) => res.json(db.listCommunityFeed(req.user.id, Number(req.query.before) || 0)));
 app.delete("/api/perspectives/:id", (req, res) => (db.deletePerspective(req.user.id, idOf(req)), res.json({ ok: true })));
 
 // What other people on this app have chosen to share about the same song.
 app.get("/api/songs/:id/community", viewsLimit, (req, res) => {
   const song = db.getSong(req.user.id, idOf(req));
   if (!song) return bad(res, "Song not found", 404);
-  res.json(db.listCommunity(req.user.id, song.key, Number(req.query.before) || 0));
+  res.json(db.listCommunity(req.user.id, song.group_key, Number(req.query.before) || 0));
 });
 
 app.post("/api/perspectives/:id/report", reportLimit, (req, res) => {

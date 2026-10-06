@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 80" width="360" height="80" role="img" aria-label="Song Explain.">
+  <g fill="none" stroke="#111111" stroke-width="6.5">
+    <circle cx="36" cy="36" r="22"/>
+  </g>
+  <circle cx="36" cy="36" r="5.5" fill="#111111"/>
+  <circle cx="64" cy="64" r="7.5" fill="#111111"/>
+  <text x="96" y="52" font-family="'Space Grotesk','Helvetica Neue',Arial,sans-serif" font-size="40" font-weight="700" letter-spacing="-1.2" fill="#111111">Song Explain.</text>
+</svg>

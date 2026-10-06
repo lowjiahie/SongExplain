@@ -331,7 +331,8 @@ document.addEventListener("click", async (e) => {
     else if (act === "account") openAccount();
     else if (act === "add") openAdd();
     else if (act === "pastelyrics") showTab("lyrics");
-    else if (act === "candpage") { CAND.page = Number(el.dataset.p); renderCandidates(); $("results").scrollIntoView({ behavior: "smooth", block: "start" }); }
+    else if (act === "addprefill") openAdd(CAND.q);
+    else if (act === "candpage") { CAND.page = Number(el.dataset.p); renderCandidates(); $("status").scrollIntoView({ behavior: "smooth", block: "start" }); }
     else if (act === "feedback") openFeedback();
     else if (act === "fbkind") setFbKind(el.dataset.v);
     else if (act === "fbadmin") { $("acctdlg").close(); openFeedbackAdmin(); }
@@ -467,19 +468,10 @@ async function renderHome() {
       </form>
       <p class="hint">Try: a song title and artist — or a youtube.com link.</p>
     </section>
-    <div class="results" id="results" hidden><span class="lab">Search results</span><p class="note status" id="status"></p><div class="masonry" id="cands"></div><nav class="pager" id="cpager" aria-label="Search result pages" hidden></nav></div>
     <span class="lab" style="margin-bottom:26px">Library <span id="libcount"></span></span>
     <div id="lib" class="masonry"></div>
   </div>`;
-  $("hsearch").onsubmit = async (e) => {
-    e.preventDefault();
-    const q = $("q").value.trim();
-    if (!q) { $("q").focus(); return; }
-    $("find").disabled = true;
-    await findSongs(q);
-    if ($("find")) $("find").disabled = false;
-    $("results")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  bindSearchForm();
   $("q").focus();
   try {
     const songs = await json("GET", "/api/songs");
@@ -498,9 +490,74 @@ async function renderHome() {
   } catch (e) { toast(e.message, "err"); }
 }
 
-// Search results are fetched once (up to ~40 songs) and shown 8 at a time with page numbers.
-const PAGE_SIZE = 8;
-let CAND = { items: [], page: 0 };
+// Searching has its own page (#/search/<query>), so results never get mixed up with your library.
+// The server returns up to ~54 songs at once; the page shows them 9 at a time (a 3 × 3 grid) with page numbers.
+const PAGE_SIZE = 9;
+const SEARCH_CACHE = new Map(); // query -> server answer; back/forward and page changes cost nothing
+let CAND = { items: [], page: 0, q: "" };
+
+function goSearch(q) {
+  q = String(q || "").trim();
+  if (!q) return;
+  const target = "#/search/" + encodeURIComponent(q);
+  if (location.hash === target) renderSearch(q); else location.hash = target;
+}
+function bindSearchForm() {
+  $("hsearch").onsubmit = (e) => {
+    e.preventDefault();
+    const q = $("q").value.trim();
+    if (!q) { $("q").focus(); return; }
+    goSearch(q);
+  };
+}
+
+async function renderSearch(q) {
+  $("navlib").classList.remove("on");
+  CAND = { items: [], page: 0, q };
+  $("view").innerHTML = `
+  <div class="fade">
+    <a class="back" href="#/">← Library</a>
+    <section class="search-head">
+      <span class="lab">Search results</span>
+      <form class="hsearch" id="hsearch" role="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+        <input id="q" type="text" autocomplete="off" aria-label="Search a song or paste a YouTube link">
+        <button class="btn" type="submit" id="find">Find</button>
+      </form>
+    </section>
+    <p class="note status" id="status">Searching…</p>
+    <div class="masonry" id="cands">${[1, 2, 3].map(() => `<div class="item"><div class="cov sk" style="background:none"></div><div class="sk" style="height:22px;width:70%;margin-top:14px"></div></div>`).join("")}</div>
+    <nav class="pager" id="cpager" aria-label="Result pages" hidden></nav>
+    <p class="note" id="notfound" hidden>Not the song you wanted? <button class="more" data-act="addprefill">Add it yourself.</button></p>
+  </div>`;
+  $("q").value = q;
+  bindSearchForm();
+
+  let d = SEARCH_CACHE.get(q);
+  if (!d) {
+    try {
+      d = await json("POST", "/api/identify", { input: q });
+      SEARCH_CACHE.set(q, d);
+      if (SEARCH_CACHE.size > 30) SEARCH_CACHE.delete(SEARCH_CACHE.keys().next().value);
+    } catch (e) {
+      if ($("status") && CAND.q === q) { $("status").className = "note status err"; $("status").textContent = e.message; $("cands").innerHTML = ""; }
+      return;
+    }
+  }
+  if (!$("cands") || CAND.q !== q) return; // you moved on while we were searching
+  const from = d.source ? `From YouTube: “${d.source.title}” — ${d.source.channel}. ` : "";
+  $("notfound").hidden = false;
+  if (!d.candidates.length) {
+    $("cands").innerHTML = "";
+    $("status").innerHTML = `${esc(from)}No matching songs found for “${esc(q.length > 60 ? q.slice(0, 60) + "…" : q)}”. Check the spelling, try the artist's name too, or <button class="more" data-act="addprefill">add it yourself.</button>`;
+    $("notfound").hidden = true;
+    return;
+  }
+  $("status").className = "note status";
+  $("status").textContent = `${from}${d.candidates.length} song${d.candidates.length === 1 ? "" : "s"} found. Choose the right one:`;
+  CAND.items = d.candidates;
+  renderCandidates();
+}
 
 function renderCandidates() {
   const box = $("cands");
@@ -524,25 +581,6 @@ function renderCandidates() {
     Array.from({ length: pages }, (_, i) => `<button type="button" data-act="candpage" data-p="${i}"${i === page ? ' aria-current="page"' : ""}>${i + 1}</button>`).join("") +
     `<button type="button" data-act="candpage" data-p="${page + 1}"${page >= pages - 1 ? " disabled" : ""}>Next →</button>` +
     `<span class="pinfo">Showing ${from}–${to} of ${items.length}</span>`;
-}
-
-async function findSongs(input) {
-  $("results").hidden = false; $("cands").innerHTML = ""; $("cpager").hidden = true;
-  $("status").className = "note status"; $("status").textContent = "Listening for the song…";
-  try {
-    const d = await json("POST", "/api/identify", { input });
-    if (!$("status")) return;
-    const from = d.source ? `From YouTube: “${d.source.title}” — ${d.source.channel}. ` : "";
-    if (!d.candidates.length) {
-      $("status").innerHTML = `${esc(from)}No matching songs found. <button class="more" id="addit">Add it yourself.</button>`;
-      $("addit").onclick = () => openAdd(d.queries?.[0] || input); return;
-    }
-    $("status").textContent = from + (d.candidates.length > PAGE_SIZE ? `${d.candidates.length} songs found. Choose the right one:` : "Choose the right one:");
-    CAND = { items: d.candidates, page: 0 };
-    renderCandidates();
-  } catch (e) {
-    if ($("status")) { $("status").className = "note status err"; $("status").textContent = e.message; }
-  }
 }
 
 /* ---------- Song page ---------- */
@@ -1391,6 +1429,8 @@ function route() {
   if (ctrl) ctrl.abort(); // leaving the page cancels a running explanation
   if (vctrl) vctrl.abort();
   window.scrollTo(0, 0);
+  const sm = location.hash.match(/^#\/search\/(.+)$/);
+  if (sm) { curTab = "explain"; let q = sm[1]; try { q = decodeURIComponent(q); } catch {} renderSearch(q); return; }
   const m = location.hash.match(/^#\/song\/(\d+)/);
   if (!m) curTab = "explain";
   m ? renderSong(m[1]) : renderHome();

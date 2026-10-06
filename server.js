@@ -7,6 +7,7 @@ import { streamChat, chat, publicProviders, friendlyError } from "./llm.js";
 import { llmConfig, youtubeKey, aiRouter } from "./connections.js";
 import * as secrets from "./secrets.js";
 import { legalPage, LEGAL_VERSION, legalConfigured } from "./legal.js";
+import { searchSongs, mergeCandidates } from "./search.js";
 
 const app = express();
 if (process.env.TRUST_PROXY) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1); // behind Fly/Render/Cloudflare
@@ -21,7 +22,7 @@ app.use((_req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.mzstatic.com; connect-src 'self'; " +
+      "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.mzstatic.com https://*.dzcdn.net; connect-src 'self'; " +
       "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
   );
   if (_req.path.startsWith("/api/")) res.setHeader("Cache-Control", "no-store");
@@ -122,7 +123,7 @@ app.use("/api", auth.requireUser);
 app.get("/api/cover", async (req, res) => {
   try {
     const u = new URL(String(req.query.u || ""));
-    if (u.protocol !== "https:" || !/(^|\.)mzstatic\.com$/i.test(u.hostname)) return res.status(400).json({ error: "Unsupported cover URL" });
+    if (u.protocol !== "https:" || !COVER_HOSTS.test(u.hostname)) return res.status(400).json({ error: "Unsupported cover URL" });
     const r = await fetch(u, { redirect: "error", signal: AbortSignal.timeout(8000) });
     const type = r.headers.get("content-type") || "";
     if (!r.ok || !type.startsWith("image/")) return res.status(502).json({ error: "Could not load the cover" });
@@ -183,15 +184,6 @@ async function youtubeInfo(url) {
   return { title, channel: author_name };
 }
 
-// Rule-based cleanup: strip noise from YouTube titles so most lookups need no AI call.
-function ruleClean(raw) {
-  return raw
-    .replace(/[\(\[【「（][^\)\]】」）]*(official|mv|m\/v|lyric|audio|video|hd|4k|remaster|live|歌词|歌詞|完整版|官方|高清|动态)[^\)\]】」）]*[\)\]】」）]/gi, " ")
-    .replace(/\b(official\s*(music\s*)?(video|mv|audio)|lyrics?\s*video|lyrics?|mv|hd|4k)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 // Fallback: ask the user's AI to turn a messy title / query into clean search strings.
 async function aiQueries(cfg, raw) {
   const text = await chat(cfg, {
@@ -210,36 +202,13 @@ async function aiQueries(cfg, raw) {
   }
 }
 
-// Search US + TW stores so both English and Chinese catalogs are covered. The iTunes API has no "page 2",
-// so we ask for a generous batch once and the page shows it 8 at a time.
-const SEARCH_PER_STORE = 30;
-const MAX_SEARCH_RESULTS = Math.min(100, Math.max(8, Math.floor(Number(process.env.SEARCH_RESULTS) || 40)));
-async function itunesSearch(term) {
-  const one = async (country) => {
-    try {
-      const res = await fetch(
-        `https://itunes.apple.com/search?media=music&entity=song&limit=${SEARCH_PER_STORE}&country=${country}&term=${encodeURIComponent(term)}`,
-        { signal: AbortSignal.timeout(8000) }
-      );
-      return res.ok ? (await res.json()).results : [];
-    } catch {
-      return [];
-    }
-  };
-  const hasCJK = /[぀-ヿ㐀-鿿]/.test(term);
-  const stores = hasCJK ? ["TW", "US"] : ["US", "TW"]; // best-fit catalog first
-  // Interleave the catalogues (best match of each first) so later pages are not all from one store.
-  const lists = await Promise.all(stores.map(one));
-  const results = [];
-  for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) results.push(l[i]);
-  return results.map((r) => ({
-    title: r.trackName,
-    artist: r.artistName,
-    album: r.collectionName,
-    year: r.releaseDate?.slice(0, 4),
-    cover: r.artworkUrl100?.replace("100x100", "300x300"),
-  }));
-}
+// Search lives in search.js (Deezer + Apple iTunes + MusicBrainz, ranked). Up to this many songs per search; the page shows 9 at a time.
+const MAX_SEARCH_RESULTS = Math.min(100, Math.max(9, Math.floor(Number(process.env.SEARCH_RESULTS) || 54)));
+// Album covers may only come from these CDNs (used for display and for the lyric-card image proxy).
+const COVER_HOSTS = /(^|\.)(mzstatic\.com|dzcdn\.net)$/i;
+const safeCover = (u) => {
+  try { const x = new URL(String(u || "")); return x.protocol === "https:" && COVER_HOSTS.test(x.hostname) ? x.href : null; } catch { return null; }
+};
 
 app.post("/api/identify", identifyLimit, async (req, res) => {
   try {
@@ -253,35 +222,22 @@ app.post("/api/identify", identifyLimit, async (req, res) => {
     let source = null;
     if (YT_RE.test(input)) {
       source = await youtubeInfo(input.startsWith("http") ? input : `https://${input}`);
-      raw = `${source.title} — ${source.channel}`;
+      // "Artist - Title" already names the artist; otherwise the channel is a useful hint
+      raw = /[-–—|｜]/.test(source.title) ? source.title : `${source.title} ${source.channel}`;
     }
 
-    const collect = async (queries) => {
-      const seen = new Set();
-      const out = [];
-      for (const q of queries) {
-        for (const c of await itunesSearch(q)) {
-          // dedupe remasters/versions: same base title + artist
-          const key = `${c.title.replace(/[\(\[].*?[\)\]]/g, "").trim()}|${c.artist}`.toLowerCase();
-          if (!seen.has(key)) {
-            seen.add(key);
-            out.push(c);
-          }
-        }
-      }
-      return out;
-    };
-
-    let queries = [ruleClean(raw) || raw];
-    let candidates = await collect(queries);
-    if (!candidates.length) {
+    let { candidates, queries } = await searchSongs(raw);
+    // Few or no matches: if an AI is connected, let it guess the real title/artist and search those as well.
+    if (candidates.length < 3) {
       let cfg = null;
       try {
-        cfg = llmConfig(req); // optional: no key just means no AI fallback
+        cfg = llmConfig(req); // optional: no AI just means no fallback
       } catch {}
       if (cfg) {
-        queries = await aiQueries(cfg, raw).catch(() => []);
-        candidates = await collect(queries);
+        const guesses = await aiQueries(cfg, raw).catch(() => []);
+        const extra = await Promise.all(guesses.map((g) => searchSongs(g).then((r) => r.candidates)));
+        candidates = mergeCandidates(candidates, ...extra);
+        queries = [...queries, ...guesses];
       }
     }
     res.json({ source, queries, candidates: candidates.slice(0, MAX_SEARCH_RESULTS) });
@@ -339,7 +295,7 @@ app.post("/api/songs", (req, res) => {
       artist: artist.trim(),
       album,
       year,
-      cover,
+      cover: safeCover(cover),
       source: source === "manual" ? "manual" : "catalog",
       lyrics,
     })

@@ -80,10 +80,28 @@ export function rateLimit({ windowMs, max, by = "ip", message = "Too many reques
 export const validEmail = (e) => typeof e === "string" && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
 export const validPassword = (p) => typeof p === "string" && p.length >= 8 && p.length <= 200;
 
-export function checkInvite(code) {
+// ---------- registration & invite codes ----------
+// closed: nobody can sign up · invite: a one-time code is needed · open: anyone can.
+// Accounts listed in ADMIN_EMAILS can always sign up (so the owner can create the first account).
+// When the app is hosted publicly (HOST != 127.0.0.1) and nothing is configured, it defaults to "invite", never "open".
+export function registrationMode() {
+  const r = String(process.env.REGISTRATION || "").toLowerCase();
+  if (r === "closed") return "closed";
+  if (r === "invite" || process.env.INVITE_CODE) return "invite";
+  if (r === "open") return "open";
+  return (process.env.HOST || "127.0.0.1") === "127.0.0.1" ? "open" : "invite";
+}
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read out loud
+export function generateCode() {
+  const part = () => Array.from({ length: 4 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join("");
+  return `${part()}-${part()}`; // ~8.5e11 possibilities; guessing is also rate-limited
+}
+export const normalizeCode = (c) => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16);
+export const hashCode = (normalized) => crypto.createHash("sha256").update(normalized).digest("hex");
+// Optional legacy shared code (INVITE_CODE). Works for everyone who knows it, so one-time codes are preferred.
+export function sharedCodeMatches(raw) {
   const need = process.env.INVITE_CODE;
-  if (process.env.REGISTRATION === "closed") return "Registration is closed.";
-  if (!need) return null;
-  const a = Buffer.from(String(code || "")), b = Buffer.from(need);
-  return a.length === b.length && crypto.timingSafeEqual(a, b) ? null : "A valid invite code is required.";
+  if (!need) return false;
+  const a = Buffer.from(String(raw || "")), b = Buffer.from(need);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }

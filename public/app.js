@@ -193,11 +193,6 @@ function syncProviderFields() {
   $("aikeyhint").textContent = k && remember ? `A ${p?.short || ""} key is already saved (${k.hint}).` : "";
   const mode = keyMode();
   document.querySelectorAll("#remseg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (mode === "server" ? "1" : mode === "device" ? "d" : "0"))));
-  $("remnote").textContent = mode === "server"
-    ? "Saved on the server, encrypted. You will only ever see its last 4 characters."
-    : mode === "device"
-      ? "Kept encrypted in this browser only — the server never stores it. Anyone who can open this browser on this computer could use it, so don't choose this on a shared computer."
-      : "Not saved anywhere — it disappears when you close or refresh this tab.";
   // the model: shown as a one-line summary; open the field only when needed (no default, or you ask to change it)
   const needsModel = !p?.model;
   const model = $("aimodelin").value.trim() || p?.model || "";
@@ -503,6 +498,8 @@ document.addEventListener("click", async (e) => {
       { const v = el.dataset.v, mode = v === "1" ? "server" : v === "d" ? "device" : "visit"; $("airemember").checked = mode === "server"; store.set("keyMode", mode); vaultSave(); }
       syncProviderFields();
     } else if (act === "aiadd") { aiAdding = true; renderAISettings(); $("aikey").focus(); }
+    else if (act === "fimg") await saveFeelingImage(Number(el.dataset.fid));
+    else if (act === "emore") { const card = el.closest(".entry"), open = card.classList.toggle("open"); el.textContent = open ? "Show less ↑" : "Read more ↓"; el.setAttribute("aria-expanded", String(open)); }
     else if (act === "amopen") amOpen(el.dataset.id);
     else if (act === "amcancel") { AMP = null; renderAISettings(); }
     else if (act === "amgo") await amGo();
@@ -708,9 +705,21 @@ async function renderJournal() {
     </div>
     <p class="note" id="jhelp"></p>
     <div class="jwrite" id="jwrite" hidden></div>
-    <div class="jtools"><input id="jq" type="text" placeholder="Search" autocomplete="off" aria-label="Search the journal"><select id="jsong" aria-label="Show one song only"></select><button class="link" id="jclear" hidden>clear filters</button></div>
-    <div class="moods" id="jtags"></div>
-    <div id="jlist"><p class="note">Loading…</p></div>
+    <section class="jfind" aria-label="Find in your journal">
+      <label class="jlabel" for="jq">Search</label>
+      <div class="jsearch">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+        <input id="jq" type="text" autocomplete="off" aria-describedby="jqhint">
+        <select id="jsong" aria-label="Show one song only"></select>
+      </div>
+      <p class="jhint" id="jqhint"></p>
+      <div class="fw-wrap" id="fwwrap" hidden>
+        <span class="jlabel">Feeling words <small>tap one to see only those feelings</small></span>
+        <div class="fwords" id="jtags"></div>
+      </div>
+      <button class="link" id="jclear" hidden>clear search and filters</button>
+    </section>
+    <div id="jlist" class="cardgrid"><p class="note">Loading…</p></div>
     <div id="jmore"></div>
   </div>`;
   let songs = [], rows = [], comm = [], hasMore = false;
@@ -744,7 +753,8 @@ async function renderJournal() {
     const counts = new Map();
     list.forEach((r) => parseTags(r.mood).forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
     if (tag && !counts.has(tag)) tag = "";
-    $("jtags").innerHTML = [...counts.entries()].sort((x, y) => y[1] - x[1]).map(([t, n]) => `<button type="button" class="mood" data-mood="${esc(t)}" aria-pressed="${t === tag}">${esc(t)} <span class="mono">${n}</span></button>`).join("");
+    $("jtags").innerHTML = [...counts.entries()].sort((x, y) => y[1] - x[1]).map(([t, n]) => `<button type="button" class="fw" data-w="${esc(t)}" aria-pressed="${t === tag}">${esc(t)}<b>${n}</b></button>`).join("");
+    $("fwwrap").hidden = !counts.size;
     const seen = new Map();
     list.forEach((r) => seen.set(String(r.song_id), `${r.title} — ${r.artist}`));
     if (songId && !seen.has(songId)) songId = "";
@@ -752,17 +762,17 @@ async function renderJournal() {
     $("jsong").hidden = seen.size < 2;
   };
   const entry = (r) => journalTab === "mine"
-    ? `<article class="entry">${entryHTML({
-        head: `<a href="#/song/${r.song_id}"><b>${esc(r.title)}</b> <span class="by">${esc(r.artist)}</span></a>`,
+    ? entryHTML({
+        song: { id: r.song_id, title: r.title, artist: r.artist, cover: r.cover }, showSong: true, imgAuthor: r.is_public ? me?.displayName || "" : "", design: r.design,
         body: r.body, mood: r.mood, anchor: r.anchor, date: fmtDate(r.created_at) + (r.updated_at ? " · edited" : ""),
         badge: r.is_public ? (r.hidden ? ["Hidden by a moderator", "warn"] : ["Shared with the community", "shared"]) : ["Only you can see this", ""],
         actions: `<a class="link" href="#/song/${r.song_id}">open song</a>`,
-      })}</article>`
-    : `<article class="entry">${entryHTML({
-        head: `<a href="#/song/${r.song_id}"><b>${esc(r.title)}</b> <span class="by">${esc(r.artist)}</span></a><span class="by">shared by <b>${esc(r.author)}</b></span>`,
+      })
+    : entryHTML({
+        song: { id: r.song_id, title: r.title, artist: r.artist, cover: r.cover }, showSong: true, author: r.author, design: r.design,
         body: r.body, mood: r.mood, anchor: r.anchor, date: fmtDate(r.published_at),
         actions: `<button class="link" data-act="report" data-id="${r.id}">report</button>${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${r.id}">hide</button>` : ""}`,
-      })}</article>`;
+      });
 
   const empty = (filtered) => {
     if (filtered) return `<div class="empty"><p>Nothing matches those filters.</p><p class="mono">Try a different word, or clear the filters.</p></div>`;
@@ -777,6 +787,10 @@ async function renderJournal() {
     $("jhelp").textContent = journalTab === "mine"
       ? "Everything you have written, newest first. Tap a word to filter by it. Only you can see the ones marked private."
       : "What other people chose to share — only for songs that are in your library. Be kind; you can report anything that isn’t.";
+    $("jq").placeholder = journalTab === "mine" ? "e.g. rainy, Mum, a song name, an artist…" : "e.g. a song, an artist, a feeling or a name…";
+    $("jqhint").textContent = journalTab === "mine"
+      ? "Looks through the words you wrote, song titles, artists, feeling words and the “About” part. Narrow it down with a song or a feeling word."
+      : "Looks through what others shared: their words, the song, the artist, feeling words, or the person’s name.";
     writeBox(); filters();
     const list = items().filter(matches);
     const filtered = !!(tag || songId || $("jq").value.trim());
@@ -789,7 +803,7 @@ async function renderJournal() {
     };
   };
   document.querySelectorAll("[data-jt]").forEach((b) => (b.onclick = () => { journalTab = b.dataset.jt; tag = ""; songId = ""; $("jq").value = ""; paint(); }));
-  $("jtags").onclick = (e) => { const b = e.target.closest(".mood"); if (!b) return; tag = tag === b.dataset.mood ? "" : b.dataset.mood; paint(); };
+  $("jtags").onclick = (e) => { const b = e.target.closest(".fw"); if (!b) return; tag = tag === b.dataset.w ? "" : b.dataset.w; paint(); };
   $("jsong").onchange = () => { songId = $("jsong").value; paint(); };
   $("jq").oninput = paint;
   $("jclear").onclick = () => { tag = ""; songId = ""; $("jq").value = ""; paint(); };
@@ -911,20 +925,280 @@ const PROMPTS = ["This song reminds me of…", "The first time I heard it, I was
 let TAG_POOL = []; // words I used on earlier feelings, offered again as chips
 const parseTags = (m) => String(m || "").split(",").map((t) => t.trim()).filter(Boolean);
 const getTags = () => parseTags($("pmood").value);
-// One layout for every feeling (mine, the community's, the journal): who/which song → what they wrote → feeling words → small print.
-function entryHTML({ head = "", body, mood, anchor, date, badge, actions = "" }) {
-  const tags = parseTags(mood);
-  return `${head ? `<div class="e-head">${head}</div>` : ""}
-    <p class="e-body">${esc(body)}</p>
-    ${tags.length ? `<div class="e-tags" aria-label="Feeling words">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
-    <div class="e-foot">${anchor ? `<span>About: ${esc(anchor)}</span>` : ""}<span>${esc(date)}</span>${badge ? `<span class="badge ${badge[1]}">${esc(badge[0])}</span>` : ""}<span class="push">${actions}</span></div>`;
+// A feeling is shown as a small card with a design. The six designs are built differently (not just recoloured):
+//   Editorial (the site's own look) · Poster (big type on the song's colour) · Sticky note · Polaroid · Ticket · Letter.
+// The same design is used on screen (CSS in index.html) and in the picture you can save (drawn below).
+const DESIGNS = [
+  { id: "paper", label: "Editorial" }, { id: "poster", label: "Poster" }, { id: "sticky", label: "Sticky note" },
+  { id: "polaroid", label: "Polaroid" }, { id: "ticket", label: "Ticket" }, { id: "letter", label: "Letter" },
+];
+const designOf = (d) => (DESIGNS.some((x) => x.id === d) ? d : "paper"); // an unknown or retired design shows as Editorial
+const HAND_STACK = '"Caveat","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+const LETTER_STACK = 'Georgia,"Noto Serif SC","Songti SC","SimSun",serif';
+const FEEL = new Map(); // id -> what is needed to draw this card as an image
+let feelSeq = 0;
+const feelHue = (song) => hueOf((song?.title || "") + (song?.artist || ""));
+const feelNo = (body) => String(([...body].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7) >>> 0) % 9000 + 1000); // the number printed on a ticket
+function thumbHTML(song) {
+  const h = feelHue(song);
+  if (!song.cover) return `<span class="e-thumb ph" style="--h:${h}">${esc([...String(song.title)][0] || "♪")}</span>`;
+  return `<span class="e-thumb" style="--h:${h}"><img src="${esc(song.cover)}" alt="" loading="lazy" data-initial="${esc([...String(song.title)][0] || "♪")}"></span>`;
 }
+// song: { id, title, artist, cover, year } · showSong: the song's name is a link on the card · author: public display name · design: card look
+// preview: draw the card for the form (no actions, nothing to save, never shortened)
+function entryHTML({ song, showSong = false, author = "", you = false, imgAuthor = author, design, body, mood, anchor, date, badge, actions = "", preview = false, empty = false }) {
+  const tags = parseTags(mood);
+  const d = designOf(design), h = feelHue(song);
+  let fid = 0;
+  if (!preview) { fid = ++feelSeq; FEEL.set(fid, { song, body, tags, author: imgAuthor, date, design: d }); }
+  const rot = (([...body].length % 5) - 2) * 0.6;
+  // long writing is shortened on the card, with "Read more" (the whole text is always one tap away)
+  const long = !preview && ([...body].length > 260 || body.split("\n").length > 6);
+  const head = showSong || author
+    ? `<div class="e-head">${showSong ? `<a class="e-song" href="#/song/${song.id}">${thumbHTML(song)}<span><b>${esc(song.title)}</b><small>${esc(song.artist)}</small></span></a>` : ""}${author ? `<span class="by">${showSong ? "shared by " : ""}<b>${esc(author)}</b>${you ? ` <span class="you">you</span>` : ""}</span>` : ""}</div>`
+    : "";
+  const cap = showSong ? `<a href="#/song/${song.id}">${esc(song.title)} · ${esc(song.artist)}</a>` : `${esc(song.title)} · ${esc(song.artist)}`;
+  const photo = song.cover ? `<img src="${esc(song.cover)}" alt="" loading="lazy" data-initial="${esc([...String(song.title)][0] || "♪")}">` : `<span class="ph">${esc([...String(song.title)][0] || "♪")}</span>`;
+  return `<article class="entry d-${d}${d === "sticky" ? " note" : ""}${preview ? " preview" : ""}${long ? " clamped" : ""}" style="--h:${h};--rot:${rot}deg"><span class="e-bar"></span>
+    <div class="e-ticket"><span>ADMIT ONE</span><span>No. ${feelNo(body)}</span></div>
+    <div class="e-photo">${photo}</div>
+    ${head}
+    <div class="e-cap">${cap}</div>
+    <div class="e-dear">Dear ${esc(song.artist)},</div>
+    <blockquote class="e-body${[...body].length < 90 ? " short" : ""}${empty ? " empty" : ""}">${esc(body)}</blockquote>
+    ${long ? `<button class="e-more" data-act="emore" type="button" aria-expanded="false">Read more ↓</button>` : ""}
+    ${tags.length ? `<div class="e-tags" aria-label="Feeling words">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+    <div class="e-sign">— ${esc(imgAuthor || "me")}</div>
+    <div class="e-foot">${anchor ? `<span>About: ${esc(anchor)}</span>` : ""}<span>${esc(date)}</span>${badge ? `<span class="badge ${badge[1]}">${esc(badge[0])}</span>` : ""}${preview ? "" : `<span class="push"><button class="link" data-act="fimg" data-fid="${fid}" type="button">${SHARE_IMG ? "share as image" : "save as image"}</button>${actions}</span>`}</div></article>`;
+}
+const SHARE_IMG = (() => { try { return matchMedia("(pointer:coarse)").matches && !!navigator.canShare?.({ files: [new File([""], "x.png", { type: "image/png" })] }); } catch { return false; } })();
+
+/* ---------- drawing a feeling as a picture (1080 × 1350, entirely in this browser) ---------- */
+// Largest text size that fits the box; if even the smallest doesn't fit, the end is cut with "…".
+function fitText(ctx, text, fontFn, maxW, maxH, start, min, lhk) {
+  let size = start, lines, lh, ok = false;
+  for (; size >= min; size -= 2) {
+    ctx.font = fontFn(size); lines = wrapLines(ctx, text, maxW); lh = size * lhk;
+    if (lines.length * lh <= maxH) { ok = true; break; }
+  }
+  if (!ok) { size = min; ctx.font = fontFn(size); lines = wrapLines(ctx, text, maxW); lh = size * lhk; }
+  const fit = Math.max(1, Math.floor(maxH / lh));
+  if (lines.length > fit) { lines = lines.slice(0, fit); lines[fit - 1] = lines[fit - 1].replace(/.{0,2}$/, "") + "…"; }
+  return { lines, size, lh };
+}
+function drawCover(ctx, x, y, s, song, cover, hue, r = 6) {
+  ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, s, s, r); ctx.clip();
+  if (cover) ctx.drawImage(cover, x, y, s, s);
+  else { ctx.fillStyle = `hsl(${hue} 22% 56%)`; ctx.fillRect(x, y, s, s); ctx.fillStyle = "rgba(255,250,240,.85)"; ctx.font = `700 ${s * 0.5}px ${SERIF_STACK}`; ctx.textAlign = "center"; ctx.fillText([...String(song.title || "♪")][0], x + s / 2, y + s * 0.67); ctx.textAlign = "left"; }
+  ctx.restore();
+}
+function drawPills(ctx, tags, x0, y0, maxX, maxY, color, fill, font = `500 28px ${MONO_STACK}`) {
+  ctx.font = font; let x = x0, y = y0;
+  for (const t of tags) {
+    const w = ctx.measureText(t).width + 44;
+    if (x + w > maxX) { x = x0; y += 68; }
+    if (y > maxY) break;
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(x, y, w, 52, 26); ctx.stroke();
+    ctx.fillStyle = fill || color; ctx.fillText(t, x + 22, y + 36);
+    x += w + 14;
+  }
+}
+function drawFooter(ctx, p, W, H, pad, ink, mute, text) {
+  const fy = H - pad - 56;
+  ctx.fillStyle = mute; ctx.globalAlpha = 0.4; ctx.fillRect(pad, fy - 44, W - pad * 2, 2); ctx.globalAlpha = 1;
+  drawMark(ctx, pad, fy - 8, 56, ink);
+  ctx.fillStyle = ink; ctx.font = `700 42px ${SERIF_STACK}`;
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "-1px";
+  ctx.fillText("Song Explain.", pad + 76, fy + 36);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+  ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.textAlign = "right";
+  ctx.fillText(text ?? (p.author ? `— ${p.author}` : p.date), W - pad, fy + 34); ctx.textAlign = "left";
+}
+const DRAW = {
+  // the site's own look: near-white, black rules, big grotesk type
+  paper(ctx, p, cover, W, H, hue) {
+    const pad = 96, ink = "#111", mute = "#7b7b78", song = p.song;
+    ctx.fillStyle = "#fafaf8"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = ink; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText("FEELING", pad, 112);
+    ctx.textAlign = "right"; ctx.fillStyle = mute; ctx.fillText(p.date, W - pad, 112); ctx.textAlign = "left";
+    ctx.fillStyle = ink; ctx.fillRect(pad, 140, 110, 4);
+    drawCover(ctx, pad, 190, 130, song, cover, hue);
+    const tx = pad + 130 + 32, tw = W - pad - tx;
+    ctx.font = `700 40px ${SERIF_STACK}`; const tl = wrapLines(ctx, song.title || "", tw).slice(0, 2);
+    tl.forEach((l, i) => ctx.fillText(l, tx, 238 + i * 48));
+    ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(wrapLines(ctx, song.artist || "", tw)[0] || "", tx, 238 + tl.length * 48 + 4);
+    const t = fitText(ctx, p.body, (s) => `700 ${s}px ${SERIF_STACK}`, W - pad * 2, H - pad - 250 - 400, 78, 34, 1.24);
+    ctx.fillStyle = ink; ctx.font = `700 ${t.size}px ${SERIF_STACK}`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-t.size * 0.02).toFixed(1)}px`;
+    t.lines.forEach((l, i) => ctx.fillText(l, pad, 400 + t.size + i * t.lh));
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    drawPills(ctx, p.tags, pad, 400 + t.lines.length * t.lh + 40, W - pad, H - pad - 190, ink);
+    drawFooter(ctx, p, W, H, pad, ink, mute);
+  },
+  // the song's colour, huge type
+  poster(ctx, p, cover, W, H, hue) {
+    const pad = 90, song = p.song, ink = "#fff", mute = "rgba(255,255,255,.75)";
+    ctx.fillStyle = `hsl(${hue} 42% 36%)`; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = ink; ctx.font = `500 28px ${MONO_STACK}`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "4px";
+    const cap = `${song.title || ""} — ${song.artist || ""}`.toUpperCase();
+    ctx.fillText(wrapLines(ctx, cap, W - pad * 2 - 170)[0] || "", pad, 120);
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    drawCover(ctx, W - pad - 130, 70, 130, song, cover, hue, 4);
+    const t = fitText(ctx, p.body, (s) => `700 ${s}px ${SERIF_STACK}`, W - pad * 2, H - pad - 290 - 260, 124, 42, 1.12);
+    ctx.fillStyle = ink; ctx.font = `700 ${t.size}px ${SERIF_STACK}`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-t.size * 0.03).toFixed(1)}px`;
+    t.lines.forEach((l, i) => ctx.fillText(l, pad, 290 + t.size + i * t.lh));
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    drawPills(ctx, p.tags, pad, 290 + t.lines.length * t.lh + 44, W - pad, H - pad - 190, ink);
+    drawFooter(ctx, p, W, H, pad, ink, mute);
+  },
+  // a yellow sticky note, taped on
+  sticky(ctx, p, cover, W, H, hue) {
+    const pad = 96, ink = "#3b3300", mute = "#7a6c1b", ac = "#b08d00", song = p.song;
+    ctx.fillStyle = "#fff2a0"; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.translate(W / 2, 20); ctx.rotate(-0.03); ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.fillRect(-120, -22, 240, 64); ctx.restore();
+    drawCover(ctx, pad, 110, 130, song, cover, hue);
+    const tx = pad + 130 + 32, tw = W - pad - tx;
+    ctx.fillStyle = ink; ctx.font = `700 40px ${SERIF_STACK}`; const tl = wrapLines(ctx, song.title || "", tw).slice(0, 2);
+    tl.forEach((l, i) => ctx.fillText(l, tx, 158 + i * 48));
+    ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(wrapLines(ctx, song.artist || "", tw)[0] || "", tx, 158 + tl.length * 48 + 4);
+    const t = fitText(ctx, p.body, (s) => `600 ${s}px ${HAND_STACK}`, W - pad * 2, H - pad - 250 - 330, 96, 34, 1.3);
+    ctx.fillStyle = ink; ctx.font = `600 ${t.size}px ${HAND_STACK}`;
+    t.lines.forEach((l, i) => ctx.fillText(l, pad, 330 + t.size + i * t.lh));
+    drawPills(ctx, p.tags, pad, 330 + t.lines.length * t.lh + 40, W - pad, H - pad - 190, ac, ink);
+    drawFooter(ctx, p, W, H, pad, ink, mute);
+  },
+  // a polaroid photo of the album cover, with a handwritten caption
+  polaroid(ctx, p, cover, W, H, hue) {
+    const song = p.song, ink = "#2a2723", mute = "#8a847a";
+    ctx.fillStyle = `hsl(${hue} 18% 80%)`; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate(-0.028);
+    ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 50; ctx.shadowOffsetY = 24;
+    ctx.fillStyle = "#fffdf8"; ctx.fillRect(-440, -580, 880, 1160); ctx.shadowColor = "transparent";
+    drawCover(ctx, -390, -530, 780, song, cover, hue, 2);
+    ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(wrapLines(ctx, `${song.title || ""} · ${song.artist || ""}`, 780)[0] || "", -390, 300);
+    const t = fitText(ctx, p.body, (s) => `600 ${s}px ${HAND_STACK}`, 780, 215, 64, 30, 1.25);
+    ctx.fillStyle = ink; ctx.font = `600 ${t.size}px ${HAND_STACK}`;
+    t.lines.forEach((l, i) => ctx.fillText(l, -390, 335 + t.size + i * t.lh));
+    drawPills(ctx, p.tags.slice(0, 5), -390, 335 + t.lines.length * t.lh + 24, 390, 520, mute, mute, `500 22px ${MONO_STACK}`);
+    ctx.fillStyle = mute; ctx.font = `400 22px ${MONO_STACK}`; ctx.textAlign = "right"; ctx.fillText(p.author ? `— ${p.author}` : "Song Explain.", 390, 548); ctx.textAlign = "left";
+    ctx.restore();
+  },
+  // a concert ticket stub
+  ticket(ctx, p, cover, W, H, hue) {
+    const song = p.song, ink = "#1b1a17", mute = "#7a7468", x0 = 64, x1 = W - 64, y0 = 100, y1 = H - 100, pad = 120;
+    ctx.fillStyle = "#e6dfcf"; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = 40; ctx.shadowOffsetY = 18;
+    ctx.fillStyle = "#f6f1e6"; ctx.beginPath(); ctx.roundRect(x0, y0, x1 - x0, y1 - y0, 14); ctx.fill(); ctx.restore();
+    const perf = 330;
+    ctx.fillStyle = "#e6dfcf"; for (const x of [x0, x1]) { ctx.beginPath(); ctx.arc(x, y0 + perf, 26, 0, Math.PI * 2); ctx.fill(); }
+    ctx.strokeStyle = ink; ctx.lineWidth = 3; ctx.setLineDash([14, 12]); ctx.beginPath(); ctx.moveTo(x0 + 40, y0 + perf); ctx.lineTo(x1 - 40, y0 + perf); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = ink; ctx.font = `700 28px ${MONO_STACK}`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "6px";
+    ctx.fillText("ADMIT ONE", pad, y0 + 80); ctx.textAlign = "right"; ctx.fillText(`No. ${feelNo(p.body)}`, x1 - 56, y0 + 80); ctx.textAlign = "left";
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    ctx.font = `700 56px ${SERIF_STACK}`; const tl = wrapLines(ctx, song.title || "", x1 - pad - 56 - pad + 56).slice(0, 2);
+    tl.forEach((l, i) => ctx.fillText(l, pad, y0 + 160 + i * 62));
+    ctx.fillStyle = mute; ctx.font = `400 28px ${MONO_STACK}`; ctx.fillText(wrapLines(ctx, song.artist || "", x1 - pad * 2)[0] || "", pad, y0 + 160 + tl.length * 62 + 4);
+    const bTop = y0 + perf + 70, bBottom = y1 - 330;
+    const t = fitText(ctx, p.body, (s) => `500 ${s}px ${MONO_STACK}`, x1 - pad * 2 + 56, bBottom - bTop, 46, 26, 1.55);
+    ctx.fillStyle = ink; ctx.font = `500 ${t.size}px ${MONO_STACK}`;
+    t.lines.forEach((l, i) => ctx.fillText(l, pad, bTop + t.size + i * t.lh));
+    drawPills(ctx, p.tags, pad, bTop + t.lines.length * t.lh + 30, x1 - pad, y1 - 250, ink, ink, `500 24px ${MONO_STACK}`);
+    // barcode, always the same for the same words
+    let seed = Number(feelNo(p.body)); const bars = [];
+    for (let x = pad; x < x1 - pad;) { seed = (seed * 9301 + 49297) % 233280; const w = 3 + Math.floor((seed / 233280) * 9); bars.push([x, w]); x += w + 3 + (seed % 5); }
+    ctx.fillStyle = ink; bars.forEach(([x, w]) => ctx.fillRect(x, y1 - 230, w, 100));
+    ctx.fillStyle = mute; ctx.font = `400 24px ${MONO_STACK}`; ctx.fillText(p.author ? `— ${p.author}   ${p.date}` : p.date, pad, y1 - 76);
+    ctx.textAlign = "right"; ctx.fillStyle = ink; ctx.font = `700 30px ${SERIF_STACK}`; ctx.fillText("Song Explain.", x1 - 56, y1 - 76); ctx.textAlign = "left";
+  },
+  // a handwritten letter to the artist, on ruled paper
+  letter(ctx, p, cover, W, H, hue) {
+    const song = p.song, ink = "#2b2418", mute = "#8b7f69", red = "rgba(190,70,70,.5)", lx = 190, lh = 66;
+    ctx.fillStyle = "#f6efdf"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(60,90,140,.2)"; for (let y = 330; y < H - 150; y += lh) ctx.fillRect(0, y, W, 2);
+    ctx.fillStyle = red; ctx.fillRect(150, 0, 3, H);
+    ctx.fillStyle = ink;
+    let ds = 62; const dear = `Dear ${song.artist || ""},`; ctx.font = `italic 400 ${ds}px ${LETTER_STACK}`;
+    while (ds > 34 && ctx.measureText(dear).width > W - lx - 300) { ds -= 2; ctx.font = `italic 400 ${ds}px ${LETTER_STACK}`; }
+    ctx.fillText(dear, lx, 262);
+    // postmark
+    ctx.save(); ctx.translate(W - 170, 190); ctx.rotate(-0.2); ctx.strokeStyle = red; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, 84, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, 68, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = red; ctx.font = `700 22px ${MONO_STACK}`; ctx.textAlign = "center"; ctx.fillText("SONG EXPLAIN", 0, -8); ctx.font = `400 20px ${MONO_STACK}`; ctx.fillText(p.date, 0, 24); ctx.restore();
+    const maxLines = Math.floor((H - 330 - 250) / lh);
+    ctx.font = `italic 400 50px ${LETTER_STACK}`;
+    let lines = wrapLines(ctx, p.body, W - lx - 100);
+    if (lines.length > maxLines) { lines = lines.slice(0, maxLines); lines[maxLines - 1] = lines[maxLines - 1].replace(/.{0,2}$/, "") + "…"; }
+    ctx.fillStyle = ink; lines.forEach((l, i) => ctx.fillText(l, lx, 330 + lh * (i + 1) - 16));
+    const sy = 330 + lh * (lines.length + 1) + 30;
+    ctx.textAlign = "right"; ctx.fillText(`— ${p.author || "me"}`, W - 100, Math.min(sy, H - 190)); ctx.textAlign = "left";
+    if (p.tags.length) { ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(p.tags.map((t) => "#" + t).join("  "), lx, H - 120); }
+    ctx.fillStyle = ink; ctx.font = `700 34px ${SERIF_STACK}`; ctx.textAlign = "right"; ctx.fillText("Song Explain.", W - 100, H - 116); ctx.textAlign = "left";
+  },
+};
+async function feelingImage(p) {
+  const W = 1080, H = 1350, song = p.song || {}, d = designOf(p.design), hue = feelHue(song);
+  await loadCardFonts(`${song.title}${song.artist}${p.body}${p.tags.join("")}${p.author}Song Explain.`);
+  if (d === "sticky" || d === "polaroid") { try { await document.fonts.load('600 60px "Caveat"', p.body + p.tags.join("")); } catch {} }
+  let cover = null;
+  if (song.cover) { try { const r = await rawApi("GET", `/api/cover?u=${encodeURIComponent(song.cover)}`); if (r.ok) cover = await createImageBitmap(await r.blob()); } catch {} }
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+  DRAW[d](ctx, { ...p, song }, cover, W, H, hue);
+  return new Promise((res) => c.toBlob(res, "image/png"));
+}
+async function saveFeelingImage(fid) {
+  const p = FEEL.get(fid);
+  if (!p) return;
+  try {
+    toast("Making your card…");
+    const blob = await feelingImage(p);
+    if (!blob) throw new Error("Could not create the image.");
+    const name = `${p.song?.title || "feeling"} - my feeling`.replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 80) + ".png";
+    const file = new File([blob], name, { type: "image/png" });
+    if (SHARE_IMG) { await navigator.share({ files: [file], title: p.song?.title || "Song Explain" }); return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast("Card saved");
+  } catch (e) { if (e.name !== "AbortError") toast(e.message, "err"); }
+}
+
+/* ---------- the form's card style picker and live preview ---------- */
+function setDesign(id) {
+  $("pdesign").value = designOf(id) === "paper" ? "" : designOf(id);
+  document.querySelectorAll("#designs [data-design]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.design === designOf(id))));
+  renderPreview();
+}
+// Shows how long the writing is. Shared feelings are limited to 1500 characters, so say so before saving fails.
+function updateCount() {
+  const n = [...$("pbody").value].length, pub = $("ppublic").checked, el = $("pcount");
+  if (!el) return;
+  el.textContent = pub ? `${n} / 1500 characters (shared feelings can be up to 1500)` : n ? `${n} characters` : "";
+  el.classList.toggle("over", pub && n > 1500);
+}
+function renderPreview() {
+  const box = $("fpreview");
+  if (!box || !curSong) return;
+  const text = $("pbody").value.trim();
+  const pub = $("ppublic").checked;
+  box.innerHTML = entryHTML({
+    song: curSong, preview: true, design: $("pdesign").value, empty: !text,
+    body: text || "Your words will appear here, like this…", mood: $("pmood").value, anchor: $("panchor").value.trim(),
+    date: new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
+    badge: pub ? ["Shared with the community", "shared"] : ["Only you can see this", ""],
+  });
+}
+
 function setMood(m) {
   $("pmood").value = parseTags(m).slice(0, MAX_TAGS).join(",");
   const sel = getTags();
   const all = [...new Set([...sel, ...MOODS, ...TAG_POOL])];
   $("moods").innerHTML = all.map((t) => `<button type="button" class="mood" data-mood="${esc(t)}" aria-pressed="${sel.includes(t)}">${esc(t)}</button>`).join("");
   $("tagcount").textContent = `${sel.length}/${MAX_TAGS}`;
+  renderPreview();
 }
 function toggleTag(t) {
   const sel = getTags();
@@ -1010,10 +1284,15 @@ async function renderSong(id) {
       <div class="tagadd"><input id="ptag" type="text" maxlength="40" placeholder="Add your own word — e.g. bittersweet, 想家, rainy bus ride" autocomplete="off" aria-label="Add your own feeling word"><button type="button" class="link" id="ptagadd">add</button><span class="mono note" id="tagcount" style="margin:0"></span></div>
       <div class="field"><input id="panchor" type="text" placeholder="About which part? e.g. Chorus, Verse 2 (optional)"></div>
       <div class="field"><textarea id="pbody" placeholder="Anything at all — a memory, a person, a moment, or just one word. Your own words, not the song's."></textarea></div>
+      <p class="pcount mono" id="pcount"></p>
       <div class="prompts"><span class="mono">Not sure where to start?</span>${PROMPTS.map((t) => `<button type="button" class="link" data-prompt="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+      <input type="hidden" id="pdesign">
+      <div class="designs-wrap"><span class="mono">Card style</span>
+        <div class="designs" id="designs" role="group" aria-label="Card style">${DESIGNS.map((d) => `<button type="button" data-design="${d.id}" class="dz dz-${d.id}" aria-pressed="${d.id === "paper"}" title="${d.label}"><i></i><span>${d.label}</span></button>`).join("")}</div></div>
+      <div class="preview-wrap"><span class="mono">Preview</span><div id="fpreview"></div></div>
       <label class="check"><input type="checkbox" id="ppublic"><span><b>Share this with the other people on this app</b>, under your display name. Don't include personal details. No links, and please don't paste lyrics. You can make it private again any time.</span></label>
       <div class="row" style="margin-top:14px"><button class="btn" id="padd">Save my feeling</button><button class="btn ghost" id="pcancel" hidden>Cancel</button><span id="pstat" class="note" style="margin:0"></span></div>
-      <div id="plist"></div>
+      <div id="plist" class="plist"></div>
     </section>
 
     <section class="panel col" id="p-lyrics" hidden>
@@ -1030,7 +1309,13 @@ async function renderSong(id) {
   setLang(curLang);
   document.querySelectorAll("#langseg button").forEach((b) => (b.onclick = () => setLang(b.dataset.lang)));
   setMood("");
+  setDesign("paper");
   loadTagPool();
+  $("designs").onclick = (e) => { const b = e.target.closest("[data-design]"); if (b) setDesign(b.dataset.design); };
+  ["pbody", "panchor"].forEach((x) => ($(x).oninput = renderPreview));
+  $("ppublic").onchange = renderPreview;
+  $("pbody").addEventListener("input", () => updateCount());
+  $("ppublic").addEventListener("change", () => updateCount());
   $("moods").onclick = (e) => { const b = e.target.closest(".mood"); if (b) toggleTag(b.dataset.mood); };
   $("ptagadd").onclick = addCustomTags;
   $("ptag").onkeydown = (e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addCustomTags(); } };
@@ -1048,7 +1333,7 @@ async function renderSong(id) {
   $("padd").onclick = async () => {
     try {
       const pub = $("ppublic").checked;
-      await sendPerspective("POST", `/api/songs/${id}/perspectives`, { body: $("pbody").value, mood: $("pmood").value, anchor: $("panchor").value, isPublic: pub });
+      await sendPerspective("POST", `/api/songs/${id}/perspectives`, { body: $("pbody").value, mood: $("pmood").value, anchor: $("panchor").value, design: $("pdesign").value, isPublic: pub });
       toast(pub ? "Saved and shared" : "Saved (private)"); COMM.loaded = false; renderSong(id);
     } catch (e) { $("pstat").className = "note err"; $("pstat").textContent = e.message; }
   };
@@ -1067,28 +1352,29 @@ async function renderSong(id) {
   document.querySelectorAll("[data-delex]").forEach((b) => (b.onclick = async () => { await json("DELETE", "/api/explanations/" + b.dataset.delex); renderSong(id); }));
 
   // perspectives
-  $("plist").innerHTML = perspectives.length ? "" : `<div class="empty" style="margin-top:34px"><p>Nothing here yet.</p><p class="mono">Write the first thing this song makes you feel — only you will see it.</p></div>`;
+  $("plist").innerHTML = perspectives.length ? `<span class="lab plist-head">Your feelings about this song</span>` : `<div class="empty" style="margin-top:34px"><p>Nothing here yet.</p><p class="mono">Write the first thing this song makes you feel — only you will see it.</p></div>`;
   perspectives.forEach((p) => {
-    const el = document.createElement("article");
-    el.className = "entry";
-    el.innerHTML = entryHTML({
+    const tmp = document.createElement("div");
+    tmp.innerHTML = entryHTML({
+      song, imgAuthor: p.is_public ? me?.displayName || "" : "", design: p.design,
       body: p.body, mood: p.mood, anchor: p.anchor, date: fmtDate(p.created_at) + (p.updated_at ? " · edited" : ""),
       badge: p.is_public ? (p.hidden ? ["Hidden by a moderator", "warn"] : ["Shared with the community", "shared"]) : ["Only you can see this", ""],
       actions: `<button class="link" data-vis>${p.is_public ? "make private" : "share"}</button><button class="link" data-edit>edit</button><button class="link danger" data-del>delete</button>`,
     });
+    const el = tmp.firstElementChild;
     el.querySelector("[data-del]").onclick = async () => { if (confirm("Delete this feeling?")) { await json("DELETE", "/api/perspectives/" + p.id); renderSong(id); } };
     el.querySelector("[data-vis]").onclick = async () => {
       try {
-        await sendPerspective("PUT", "/api/perspectives/" + p.id, { body: p.body, mood: p.mood || "", anchor: p.anchor || "", isPublic: !p.is_public });
+        await sendPerspective("PUT", "/api/perspectives/" + p.id, { body: p.body, mood: p.mood || "", anchor: p.anchor || "", design: p.design || "", isPublic: !p.is_public });
         toast(p.is_public ? "Now private" : "Shared with the community"); COMM.loaded = false; renderSong(id);
       } catch (e) { toast(e.message, "err"); }
     };
     el.querySelector("[data-edit]").onclick = () => {
-      setMood(p.mood || ""); $("panchor").value = p.anchor || ""; $("pbody").value = p.body; $("ppublic").checked = !!p.is_public;
+      setMood(p.mood || ""); $("panchor").value = p.anchor || ""; $("pbody").value = p.body; $("ppublic").checked = !!p.is_public; setDesign(p.design || "paper");
       $("padd").textContent = "Update"; $("pcancel").hidden = false;
       $("pcancel").onclick = () => renderSong(id);
       $("padd").onclick = async () => {
-        try { await sendPerspective("PUT", "/api/perspectives/" + p.id, { body: $("pbody").value, mood: $("pmood").value, anchor: $("panchor").value, isPublic: $("ppublic").checked }); toast("Updated"); COMM.loaded = false; renderSong(id); }
+        try { await sendPerspective("PUT", "/api/perspectives/" + p.id, { body: $("pbody").value, mood: $("pmood").value, anchor: $("panchor").value, design: $("pdesign").value, isPublic: $("ppublic").checked }); toast("Updated"); COMM.loaded = false; renderSong(id); }
         catch (e) { $("pstat").className = "note err"; $("pstat").textContent = e.message; }
       };
       $("pbody").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1157,11 +1443,11 @@ function renderCommunity(song) {
     box.innerHTML = `<div class="empty" style="margin-top:18px"><p>No one has shared a feeling about this song yet.</p><p class="mono">Write one in “My feelings” and tick “Share” — you could be the first.</p></div>`;
     return;
   }
-  box.innerHTML = COMM.items.map((p) => `<article class="entry">${entryHTML({
-      head: `<b>${esc(p.author)}</b>${p.mine ? ` <span class="you">you</span>` : ""}`,
+  box.innerHTML = COMM.items.map((p) => entryHTML({
+      song, author: p.author, you: p.mine, design: p.design,
       body: p.body, mood: p.mood, anchor: p.anchor, date: fmtDate(p.published_at),
       actions: `${p.mine ? "" : `<button class="link" data-act="report" data-id="${p.id}">report</button>`}${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${p.id}">hide</button>` : ""}`,
-    })}</article>`).join("") +
+    })).join("") +
     (COMM.hasMore ? `<div class="row" style="margin-top:22px"><button class="btn ghost" id="commmore">Show more</button></div>` : "");
   if ($("commmore")) $("commmore").onclick = () => loadCommunity(song, true);
 }

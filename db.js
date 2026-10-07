@@ -92,7 +92,7 @@ if (!hasCol("users", "display_name")) db.exec("ALTER TABLE users ADD COLUMN disp
 if (!hasCol("users", "terms_version")) db.exec("ALTER TABLE users ADD COLUMN terms_version TEXT");
 if (!hasCol("users", "terms_accepted_at")) db.exec("ALTER TABLE users ADD COLUMN terms_accepted_at TEXT");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_dname ON users(display_name COLLATE NOCASE) WHERE display_name IS NOT NULL");
-for (const [col, def] of [["is_public", "INTEGER NOT NULL DEFAULT 0"], ["hidden", "INTEGER NOT NULL DEFAULT 0"], ["published_at", "TEXT"]])
+for (const [col, def] of [["is_public", "INTEGER NOT NULL DEFAULT 0"], ["hidden", "INTEGER NOT NULL DEFAULT 0"], ["published_at", "TEXT"], ["design", "TEXT"]])
   if (!hasCol("perspectives", col)) db.exec(`ALTER TABLE perspectives ADD COLUMN ${col} ${def}`);
 db.exec(`
 CREATE INDEX IF NOT EXISTS idx_persp_public ON perspectives(is_public, hidden, song_id);
@@ -221,23 +221,23 @@ export const deleteExplanation = (userId, id) =>
   db.prepare("DELETE FROM explanations WHERE id = ? AND song_id IN (SELECT id FROM songs WHERE user_id = ?)").run(id, userId);
 
 export const listPerspectives = (songId) => db.prepare("SELECT * FROM perspectives WHERE song_id = ? ORDER BY id DESC").all(songId);
-export const addPerspective = (songId, { body, mood, anchor, isPublic }) =>
+export const addPerspective = (songId, { body, mood, anchor, isPublic, design }) =>
   db
-    .prepare(`INSERT INTO perspectives (song_id,body,mood,anchor,is_public,published_at) VALUES (?,?,?,?,?,${isPublic ? "datetime('now')" : "NULL"})`)
-    .run(songId, body, mood || null, anchor || null, isPublic ? 1 : 0);
+    .prepare(`INSERT INTO perspectives (song_id,body,mood,anchor,design,is_public,published_at) VALUES (?,?,?,?,?,?,${isPublic ? "datetime('now')" : "NULL"})`)
+    .run(songId, body, mood || null, anchor || null, design || null, isPublic ? 1 : 0);
 // Editing a post never un-hides a post a moderator hid. Making it public stamps published_at once.
-export const updatePerspective = (userId, id, { body, mood, anchor, isPublic }) =>
+export const updatePerspective = (userId, id, { body, mood, anchor, isPublic, design }) =>
   db
     .prepare(
-      `UPDATE perspectives SET body=?, mood=?, anchor=?, is_public=?, updated_at=datetime('now'),
+      `UPDATE perspectives SET body=?, mood=?, anchor=?, design=?, is_public=?, updated_at=datetime('now'),
          published_at = CASE WHEN ? = 1 AND published_at IS NULL THEN datetime('now') ELSE published_at END
        WHERE id=? AND song_id IN (SELECT id FROM songs WHERE user_id = ?)`
     )
-    .run(body, mood || null, anchor || null, isPublic ? 1 : 0, isPublic ? 1 : 0, id, userId);
+    .run(body, mood || null, anchor || null, design || null, isPublic ? 1 : 0, isPublic ? 1 : 0, id, userId);
 export const listJournal = (userId) =>
   db
     .prepare(
-      `SELECT p.id, p.song_id, p.body, p.mood, p.anchor, p.is_public, p.hidden, p.created_at, p.updated_at, s.title, s.artist, s.cover
+      `SELECT p.id, p.song_id, p.body, p.mood, p.anchor, p.design, p.is_public, p.hidden, p.created_at, p.updated_at, s.title, s.artist, s.cover
        FROM perspectives p JOIN songs s ON s.id = p.song_id WHERE s.user_id = ? ORDER BY p.id DESC`
     )
     .all(userId);
@@ -311,7 +311,7 @@ export const countPublishedSince = (userId, sinceSql) =>
 export function listCommunity(userId, groupKey, beforeId, limit = 20) {
   const rows = db
     .prepare(
-      `SELECT p.id, p.body, p.mood, p.anchor, p.published_at, p.updated_at, u.display_name AS author, (s.user_id = ?) AS mine
+      `SELECT p.id, p.body, p.mood, p.anchor, p.design, p.published_at, p.updated_at, u.display_name AS author, (s.user_id = ?) AS mine
        FROM perspectives p
        JOIN songs s ON s.id = p.song_id
        JOIN users u ON u.id = s.user_id
@@ -327,7 +327,7 @@ export function listCommunity(userId, groupKey, beforeId, limit = 20) {
 export function listCommunityFeed(userId, beforeId, limit = 20) {
   const rows = db
     .prepare(
-      `SELECT p.id, p.body, p.mood, p.anchor, p.published_at, u.display_name AS author, m.id AS song_id, m.title, m.artist, m.cover
+      `SELECT p.id, p.body, p.mood, p.anchor, p.design, p.published_at, u.display_name AS author, m.id AS song_id, m.title, m.artist, m.cover
        FROM perspectives p
        JOIN songs s ON s.id = p.song_id
        JOIN users u ON u.id = s.user_id

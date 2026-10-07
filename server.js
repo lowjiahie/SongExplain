@@ -545,10 +545,12 @@ const MAX_TAGS = 5, MAX_TAG_LEN = 24;
 const cleanTags = (raw) =>
   [...new Set(String(Array.isArray(raw) ? raw.join(",") : raw || "").split(/[,，、;；\n]/).map((t) => t.trim().replace(/\s+/g, " ").slice(0, MAX_TAG_LEN)).filter(Boolean))]
     .slice(0, MAX_TAGS).join(",");
+// The look of the card a feeling is shown on. Only these names are accepted.
+const DESIGNS = ["paper", "poster", "sticky", "polaroid", "ticket", "letter"];
 const perspectiveInput = (req, res) => {
   const body = String(req.body?.body || "").trim();
   if (body.length < 2 || body.length > 5000) return bad(res, "Write between 2 and 5000 characters"), null;
-  return { body, mood: cleanTags(req.body?.mood), anchor: String(req.body?.anchor || "").slice(0, 60), isPublic: req.body?.isPublic === true };
+  return { body, mood: cleanTags(req.body?.mood), anchor: String(req.body?.anchor || "").slice(0, 60), design: DESIGNS.includes(req.body?.design) && req.body.design !== "paper" ? req.body.design : null, isPublic: req.body?.isPublic === true };
 };
 // Returns true if sharing must stop here (the response has been sent).
 function sharingBlocked(req, res, songId, p, alreadyPublished) {

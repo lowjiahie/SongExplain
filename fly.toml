@@ -1,31 +1,34 @@
-# Fly.io config. Change `app` to a unique name, then follow DEPLOY.md.
-app = "songexplain"
-primary_region = "sin"
+# fly.toml app configuration file generated for songexplain on 2026-10-07T07:57:37Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'songexplain'
+primary_region = 'sin'
 
 [build]
 
 [env]
-  PORT = "8080"
+  PORT = '8080'
 
-# SQLite lives on this volume, so run exactly ONE machine.
-[mounts]
-  source = "songdata"
-  destination = "/data"
+[[mounts]]
+  source = 'songdata'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
 
   [[http_service.checks]]
-    method = "GET"
-    path = "/healthz"
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "10s"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/healthz'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'

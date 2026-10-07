@@ -1,5 +1,5 @@
 # Fly.io config. Change `app` to a unique name, then follow DEPLOY.md.
-app = "song-explain-CHANGE-ME"
+app = "songexplain"
 primary_region = "sin"
 
 [build]

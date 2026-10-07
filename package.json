@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "backup": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning backup.js",
     "start": "node --env-file-if-exists=.env server.js"
   },
   "dependencies": {

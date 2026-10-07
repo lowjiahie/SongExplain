@@ -8,6 +8,7 @@ import { llmConfig, youtubeKey, aiRouter } from "./connections.js";
 import * as secrets from "./secrets.js";
 import { legalPage, LEGAL_VERSION, legalConfigured } from "./legal.js";
 import { searchSongs, mergeCandidates } from "./search.js";
+import { backupIfDue } from "./backup.js";
 
 const app = express();
 if (process.env.TRUST_PROXY) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1); // behind Fly/Render/Cloudflare
@@ -65,6 +66,8 @@ app.get("/api/auth/me", (req, res) =>
     registration: auth.registrationMode(),
     full: !!MAX_USERS && db.countUsers() >= MAX_USERS,
     legalVersion: LEGAL_VERSION,
+    contact: process.env.CONTACT_EMAIL || null,
+    guideUrl: /^https:\/\//.test(process.env.GUIDE_URL || "") ? process.env.GUIDE_URL : null,
   })
 );
 
@@ -659,3 +662,5 @@ if (!legalConfigured())
   console.warn("\nNote: CONTACT_EMAIL is not set, so the Terms and Privacy pages show a placeholder. Set OPERATOR_NAME and CONTACT_EMAIL before inviting testers.\n");
 setInterval(() => db.purgeSessions(), 6 * 3600_000).unref();
 app.listen(port, host, () => console.log(`Song Explain running on http://localhost:${port} (${host})`));
+backupIfDue();
+setInterval(backupIfDue, 6 * 3600 * 1000).unref();

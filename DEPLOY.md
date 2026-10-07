@@ -99,6 +99,8 @@ fly secrets set ADMIN_EMAILS=<你自己的邮箱>      # 可以填多个，用�
 
 ```bash
 fly secrets set OPERATOR_NAME="你的名字" CONTACT_EMAIL="你的联系邮箱" HOSTING_NOTE="Fly.io（服务器在新加坡）" MAX_USERS=50
+# 登录页的使用指南链接（Google Drive 的 PDF 分享链接，须为 https）：
+fly secrets set GUIDE_URL="https://drive.google.com/file/d/xxxx/view?usp=sharing"
 ```
 
 - `CONTACT_EMAIL` 没设置时，条款里会显示一个红色占位符，启动时终端也会提醒你。版权下架的联系方式就是这个邮箱。

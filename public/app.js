@@ -5,6 +5,7 @@ const MOODS = ["nostalgic", "heartbreak", "hopeful", "angry", "grateful", "heali
 const LANGS = ["English", "简体中文", "繁體中文"];
 let me = null;          // signed-in user { id, email } or null
 let regFull = false;    // the beta has reached MAX_USERS
+let guideUrl = null, contactEmail = null;
 let regMode = "open";   // open | invite | closed
 // Only harmless preferences live in the browser (theme, language, which model you picked).
 // API keys are not kept here in plain text: they are saved encrypted on the server, or — only if you choose "This device" — encrypted in this browser's IndexedDB (see AI settings).
@@ -2121,6 +2122,8 @@ function renderAuth(mode = "login", notice = "") {
       ${reg ? `<label class="check"><input type="checkbox" id="agree"><span>I am 18 or older and I agree to the <a href="/legal/terms" target="_blank" rel="noopener">Terms of Use</a> and the <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Notice</a>.</span></label>` : ""}
       <div class="row" style="margin-top:24px"><button class="btn" type="submit" id="authgo">${reg ? "Create account" : "Sign in"}</button><span id="autherr" class="note err" style="margin:0"></span></div>
     </form>
+    ${guideUrl ? `<p class="note alt"><a href="${esc(guideUrl)}" target="_blank" rel="noopener noreferrer">📖 Beta user guide (PDF) ↗</a> — how to get started, and how to get a free Gemini API key.</p>` : ""}
+    ${regMode === "invite" && contactEmail ? `<p class="note alt">Want to try it? Email <a href="mailto:${esc(contactEmail)}?subject=Song%20Explain%20invite%20code">${esc(contactEmail)}</a> to request an invite code.</p>` : ""}
     ${regMode === "closed" && !reg ? "" : `<p class="note alt">${reg ? "Already have an account?" : "New here?"} <button class="more" id="authswitch">${reg ? "Sign in." : "Create an account."}</button></p>`}
   </section>`;
   $("em").focus();
@@ -2222,7 +2225,7 @@ window.addEventListener("hashchange", route);
 (async function boot() {
   try {
     const d = await (await fetch("/api/auth/me")).json();
-    me = d.user; regMode = d.registration || "open"; regFull = !!d.full;
+    me = d.user; regMode = d.registration || "open"; regFull = !!d.full; guideUrl = d.guideUrl || null; contactEmail = d.contact || null;
   } catch { me = null; }
   updateChrome();
   if (me && !me.termsAccepted && !(await requireTerms())) return;

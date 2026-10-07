@@ -517,3 +517,10 @@ export const resetSongGroup = (userId, songId) =>
   db.prepare("UPDATE songs SET group_key = ?, group_checked = 1, linked_note = NULL WHERE id = ? AND user_id = ?").run(
     ...(() => { const r = db.prepare("SELECT title, artist FROM songs WHERE id = ? AND user_id = ?").get(songId, userId); return [r ? groupKeyOf(r.title, r.artist) : null, songId, userId]; })()
   );
+
+// Consistent snapshot of the live database (safe with WAL; a plain file copy of the .db is not).
+export const DB_PATH = DB_FILE;
+export function backupTo(file) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+}

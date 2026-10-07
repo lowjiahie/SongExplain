@@ -68,6 +68,13 @@ export function redact(text, ...secrets) {
 
 // Async generator yielding text chunks.
 // `info` (optional) is filled in: info.truncated = true when the model hit its output limit.
+// "none" turns thinking off (Flash models); Pro models can't be switched off, so they get the lowest setting.
+function geminiEffort(cfg) {
+  if (cfg.provider !== "gemini") return null;
+  const m = String(cfg.model).toLowerCase();
+  if (!/gemini-(2\.5|3)/.test(m)) return null;
+  return /pro/.test(m) ? "low" : "none";
+}
 export async function* streamChat(cfg, { system, user, maxTokens, info = {} }) {
   if (cfg.provider === "anthropic") {
     const client = new Anthropic({ apiKey: cfg.apiKey });
@@ -87,14 +94,20 @@ export async function* streamChat(cfg, { system, user, maxTokens, info = {} }) {
   const messages = [];
   if (system) messages.push({ role: "system", content: system });
   messages.push({ role: "user", content: user });
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(cfg.apiKey && { Authorization: `Bearer ${cfg.apiKey}` }),
-    },
-    body: JSON.stringify({ model: cfg.model, messages, stream: true, [cfg.tokenParam]: maxTokens }),
-  });
+  const post = (extra) =>
+    fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(cfg.apiKey && { Authorization: `Bearer ${cfg.apiKey}` }),
+      },
+      body: JSON.stringify({ model: cfg.model, messages, stream: true, [cfg.tokenParam]: maxTokens, ...extra }),
+    });
+  // Gemini 2.5+ "thinks" before answering, and those hidden thinking tokens are counted against the output limit —
+  // so a 3000-token limit can be used up before the explanation has really started. Keep the thinking minimal.
+  const effort = geminiEffort(cfg);
+  let res = await post(effort ? { reasoning_effort: effort } : {});
+  if (!res.ok && effort && res.status === 400) res = await post({}); // this model rejects the setting: send it without
   if (!res.ok) {
     const body = (await res.text().catch(() => "")).slice(0, 300);
     throw Object.assign(new Error(`${cfg.label} error ${res.status}: ${body}`), { status: res.status });

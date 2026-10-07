@@ -104,12 +104,14 @@ export async function youtubePage(artist, title, apiKey, pageToken = "") {
 // Returns { views: [{text, likes}], comments: [text] (top 12, for the AI), wiki }.
 export async function gatherContext(artist, title) {
   const key = `${artist}|${title}`.toLowerCase();
-  if (cache.has(key)) return cache.get(key);
+  const hit = cache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.ctx;
   const [views, wiki] = await Promise.all([
     listenerViews(artist, title).catch(() => []),
     wikipediaBackground(artist, title).catch(() => null),
   ]);
   const ctx = { views, comments: views.slice(0, 12).map((v) => v.text), wiki };
-  if (views.length || wiki) cache.set(key, ctx);
+  // found something: keep it 6 hours; found nothing: only 10 minutes, so a temporary failure isn't remembered for long
+  cache.set(key, { ctx, exp: Date.now() + (views.length || wiki ? 6 * 3600_000 : 10 * 60_000) });
   return ctx;
 }

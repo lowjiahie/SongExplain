@@ -3,7 +3,7 @@
 // DRAFT: written for a small invite-only beta run from Malaysia. It is not legal advice. Have a lawyer review it
 // before opening the service to the public. Set OPERATOR_NAME and CONTACT_EMAIL in the environment.
 // Bump LEGAL_VERSION whenever the text changes in a way users must accept again.
-export const LEGAL_VERSION = "2026-10-06-r3"; // YYYY-MM-DD-revision: shown date is the first 10 characters
+export const LEGAL_VERSION = "2026-10-06-r4"; // YYYY-MM-DD-revision: shown date is the first 10 characters
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const operator = () => esc(process.env.OPERATOR_NAME || "the person who runs this app");
@@ -128,7 +128,7 @@ const PRIVACY = {
 <h2>3. Who we share data with</h2>
 <ul>
 <li><b>The AI provider you choose</b> (for example Anthropic, OpenAI, Google, DeepSeek, Alibaba, Groq, OpenRouter or a custom service) receives the song title, artist, lyrics text and related material for each request you make.</li>
-<li><b>Music, lyrics and comment sources:</b> song titles and artists are sent to LRCLIB, NetEase Cloud Music, lyrics.ovh, Apple’s iTunes Search, Deezer, MusicBrainz, Wikipedia and, if you add a YouTube key, Google/YouTube, to find lyrics, covers and background. Your email and name are not sent.</li>
+<li><b>Music, lyrics and comment sources:</b> song titles and artists are sent to LRCLIB, NetEase Cloud Music, Kugou, lyrics.ovh, Apple’s iTunes Search, Deezer, MusicBrainz, Wikipedia and, if you add a YouTube key, Google/YouTube, to find lyrics, covers and background. Your email and name are not sent.</li>
 <li><b>Google Fonts:</b> page fonts are loaded from Google, which may receive your IP address and browser details.</li>
 <li><b>Hosting:</b> ${esc(process.env.HOSTING_NOTE || "our hosting provider")}.</li>
 <li>We may disclose data where the law requires it. We do not sell personal data.</li>
@@ -179,7 +179,7 @@ const PRIVACY = {
 <h2>3. Dengan siapa kami berkongsi data</h2>
 <ul>
 <li><b>Penyedia AI yang anda pilih</b> (contohnya Anthropic, OpenAI, Google, DeepSeek, Alibaba, Groq, OpenRouter atau perkhidmatan tersuai) menerima tajuk lagu, artis, teks lirik dan bahan berkaitan bagi setiap permintaan yang anda buat.</li>
-<li><b>Sumber muzik, lirik dan komen:</b> tajuk lagu dan artis dihantar kepada LRCLIB, NetEase Cloud Music, lyrics.ovh, iTunes Search Apple, Deezer, MusicBrainz, Wikipedia dan, jika anda menambah kunci YouTube, Google/YouTube, untuk mencari lirik, sampul dan maklumat latar. E-mel dan nama anda tidak dihantar.</li>
+<li><b>Sumber muzik, lirik dan komen:</b> tajuk lagu dan artis dihantar kepada LRCLIB, NetEase Cloud Music, Kugou, lyrics.ovh, iTunes Search Apple, Deezer, MusicBrainz, Wikipedia dan, jika anda menambah kunci YouTube, Google/YouTube, untuk mencari lirik, sampul dan maklumat latar. E-mel dan nama anda tidak dihantar.</li>
 <li><b>Google Fonts:</b> fon halaman dimuatkan daripada Google, yang mungkin menerima alamat IP dan butiran pelayar anda.</li>
 <li><b>Pengehosan:</b> ${esc(process.env.HOSTING_NOTE || "penyedia pengehosan kami")}.</li>
 <li>Kami boleh mendedahkan data jika dikehendaki oleh undang-undang. Kami tidak menjual data peribadi.</li>
@@ -230,7 +230,7 @@ const PRIVACY = {
 <h2>3. 我们与谁共享资料</h2>
 <ul>
 <li><b>你选择的 AI 服务商</b>（例如 Anthropic、OpenAI、Google、DeepSeek、阿里、Groq、OpenRouter 或自定义服务）会在你每次请求时收到歌名、歌手、歌词文字和相关资料。</li>
-<li><b>音乐、歌词和评论来源：</b>歌名和歌手会发送给 LRCLIB、网易云音乐、lyrics.ovh、Apple iTunes Search、Deezer、MusicBrainz、维基百科，以及（如果你添加了 YouTube key）Google/YouTube，用于查找歌词、封面和背景资料。不会发送你的邮箱和姓名。</li>
+<li><b>音乐、歌词和评论来源：</b>歌名和歌手会发送给 LRCLIB、网易云音乐、酷狗音乐、lyrics.ovh、Apple iTunes Search、Deezer、MusicBrainz、维基百科，以及（如果你添加了 YouTube key）Google/YouTube，用于查找歌词、封面和背景资料。不会发送你的邮箱和姓名。</li>
 <li><b>Google Fonts：</b>页面字体从 Google 加载，Google 可能会收到你的 IP 地址和浏览器信息。</li>
 <li><b>托管：</b>${esc(process.env.HOSTING_NOTE || "我们的托管服务商")}。</li>
 <li>法律要求时我们可能披露资料。我们不出售个人资料。</li>

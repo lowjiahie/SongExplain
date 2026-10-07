@@ -20,7 +20,11 @@ const fmtDate = (s) => { try { return new Date(s.replace(" ", "T") + "Z").toLoca
 function toast(msg, kind = "") {
   const el = document.createElement("div");
   el.className = "toast " + kind; el.textContent = msg;
-  $("toasts").append(el); setTimeout(() => el.remove(), kind === "err" ? 6000 : 3200);
+  const box = $("toasts");
+  box.append(el);
+  // re-open the popover so it is the newest thing in the top layer — above any dialog that is open right now
+  try { box.hidePopover(); box.showPopover(); } catch {}
+  setTimeout(() => el.remove(), kind === "err" ? 6000 : 3200);
 }
 function coverHTML(item) {
   const h = hueOf(item.title + item.artist);
@@ -174,11 +178,11 @@ function renderAISettings() {
   const saved = provs.map((pid) => {
     const k = AI.keys.find((x) => x.provider === pid), p = providers.find((x) => x.id === pid);
     return `<div class="aiprov"><div class="row"><b>${esc(p?.short || pid)}</b><span class="note" style="margin:0">saved · ${esc(k?.hint || "")}</span><button class="link danger push" data-act="rmkey" data-p="${esc(pid)}">Remove key</button></div>
-      ${(byProv[pid] || []).map((m) => row(m.status, m.model, statusText[m.status] || "", `<button class="link" data-act="retest" data-id="${m.id}">Test</button><button class="link danger" data-act="rmmodel" data-id="${m.id}">Remove</button>`, m.status === "failed" ? m.error : "")).join("")}</div>`;
+      ${(byProv[pid] || []).map((m) => row(m.status, m.model, statusText[m.status] || "", `<button class="link" data-act="retest" data-id="${m.id}">Test</button><button class="link danger" data-act="rmmodel" data-id="${m.id}">Remove</button>`, m.status === "failed" ? m.error : "")).join("")}${amUI("p:" + pid)}</div>`;
   }).join("");
   const sess = SESS.length
     ? `<div class="aiprov"><div class="row"><b>This visit only</b><span class="note" style="margin:0">not saved</span></div>
-        ${SESS.map((s) => row(s.status, `${s.short} · ${s.model}`, s.status === "ok" ? "connected" : "failed", `<button class="link" data-act="stest" data-sid="${s.sid}">Test</button><button class="link danger" data-act="srm" data-sid="${s.sid}">Remove</button>`, s.status === "failed" ? s.error : "")).join("")}</div>`
+        ${SESS.map((s) => row(s.status, `${s.short} · ${s.model}`, s.status === "ok" ? "connected" : "failed", `<button class="link" data-act="stest" data-sid="${s.sid}">Test</button><button class="link danger" data-act="srm" data-sid="${s.sid}">Remove</button>`, s.status === "failed" ? s.error : "")).join("")}${[...new Map(SESS.map((x) => [x.provider + "|" + x.key, x])).values()].map((x) => amUI("s:" + x.sid)).join("")}</div>`
     : "";
   $("aimodels").innerHTML = saved + sess;
 
@@ -194,6 +198,94 @@ function renderAISettings() {
   }
 }
 
+/* ---------- one key, many models ---------- */
+// A key belongs to a provider, and a provider has many models. "+ Add models" looks up what the key can use,
+// lets you tick several, tests each one, and connects the ones that pass — without pasting the key again.
+let AMP = null; // the open "add models" panel: { id: "p:gemini" | "s:3", loading, models, picked, custom, filter, status }
+const AM_MAX = 8; // each model is tested once, and tests are rate-limited
+
+const amTarget = (id) => {
+  if (id.startsWith("p:")) return { saved: true, provider: id.slice(2) };
+  const c = SESS.find((x) => x.sid === Number(id.slice(2)));
+  return c ? { saved: false, provider: c.provider, c } : null;
+};
+const amHave = (t) => new Set(t.saved ? AI.models.filter((m) => m.provider === t.provider).map((m) => m.model) : SESS.filter((s) => s.provider === t.provider && s.key === t.c.key).map((s) => s.model));
+
+function amListHTML() {
+  const f = AMP.filter.trim().toLowerCase();
+  const shown = AMP.models.filter((m) => !f || m.toLowerCase().includes(f));
+  if (!AMP.models.length) return `<p class="note" style="margin:6px 0">This provider didn’t list its models — type the model name below.</p>`;
+  if (!shown.length) return `<p class="note" style="margin:6px 0">No model matches “${esc(AMP.filter)}”.</p>`;
+  return shown.map((m) => `<label class="check amrow"><input type="checkbox" data-am="${esc(m)}"${AMP.picked.has(m) ? " checked" : ""}><span>${esc(m)}</span></label>`).join("");
+}
+function amPanelHTML() {
+  if (AMP.loading) return `<div class="addpanel"><p class="note" style="margin:0">Looking up the models on your account…</p></div>`;
+  return `<div class="addpanel">
+    <p class="note" style="margin:0 0 8px">Tick the models you want to use with this key. Each one is tested before it is added.</p>
+    ${AMP.models.length > 8 ? `<input id="amfilter" type="text" placeholder="Filter models" autocomplete="off" value="${esc(AMP.filter)}">` : ""}
+    <div class="amlist" id="amlist">${amListHTML()}</div>
+    <div class="field"><input id="amcustom" type="text" placeholder="Or type a model name" autocomplete="off" spellcheck="false" value="${esc(AMP.custom)}"></div>
+    <div class="row" style="margin-top:12px"><button class="btn sm" data-act="amgo" type="button"${AMP.busy ? " disabled" : ""}>${AMP.busy ? "Testing…" : "Test &amp; add"}</button><button class="link" data-act="amcancel" type="button">Cancel</button><span class="note ${AMP.err ? "err" : ""}" id="amstat" style="margin:0">${esc(AMP.status || "")}</span></div>
+  </div>`;
+}
+const amUI = (id) => (AMP?.id === id ? amPanelHTML() : `<div class="row" style="margin-top:6px"><button class="link" data-act="amopen" data-id="${esc(id)}" type="button">+ Add models</button></div>`);
+
+async function amOpen(id) {
+  const t = amTarget(id);
+  if (!t) return;
+  AMP = { id, loading: true, models: [], picked: new Set(), custom: "", filter: "", status: "", err: false, busy: false };
+  renderAISettings();
+  try {
+    const body = t.saved ? { provider: t.provider } : { provider: t.provider, apiKey: t.c.key, baseUrl: t.c.baseUrl };
+    const have = amHave(t);
+    AMP.models = (await json("POST", "/api/ai/discover", body)).models.filter((m) => !have.has(m));
+  } catch (e) { if (AMP) { AMP.status = e.message; AMP.err = true; } }
+  if (AMP) { AMP.loading = false; renderAISettings(); }
+}
+
+async function amGo() {
+  const t = AMP && amTarget(AMP.id);
+  if (!t) return;
+  const custom = ($("amcustom")?.value || "").trim();
+  const names = [...new Set([...AMP.picked, ...(custom ? [custom] : [])])];
+  if (!names.length) { AMP.status = "Tick at least one model."; AMP.err = true; $("amstat").className = "note err"; $("amstat").textContent = AMP.status; return; }
+  if (names.length > AM_MAX) { AMP.status = `Add up to ${AM_MAX} at a time.`; AMP.err = true; $("amstat").className = "note err"; $("amstat").textContent = AMP.status; return; }
+  AMP.custom = custom; AMP.busy = true; AMP.err = false; renderAISettings();
+  const failed = [];
+  let ok = 0, lastId = null;
+  for (const model of names) {
+    $("amstat") && ($("amstat").textContent = `Testing ${model}…`);
+    try {
+      if (t.saved) {
+        const r = await json("POST", "/api/ai/connect", { provider: t.provider, model });
+        if (r.ok) { ok++; lastId = r.model.id; } else failed.push(`${model}: ${r.error || "failed"}`);
+      } else {
+        const r = await json("POST", "/api/ai/test", { provider: t.provider, apiKey: t.c.key, model, baseUrl: t.c.baseUrl });
+        if (r.ok) { SESS.push({ sid: ++sessSeq, provider: t.provider, short: t.c.short, model, baseUrl: t.c.baseUrl, key: t.c.key, hint: t.c.hint, status: "ok", ms: r.ms }); ok++; }
+        else failed.push(`${model}: ${r.error || "failed"}`);
+      }
+    } catch (e) { failed.push(`${model}: ${e.message}`); }
+  }
+  if (t.saved) await loadAI();
+  if (!failed.length) { AMP = null; renderAISettings(); refreshAIChrome(); renderModelPicker(); toast(ok === 1 ? "Model added" : `${ok} models added`); return; }
+  // keep the panel open so the failures can be read (and retried); the models that worked are already added
+  const have = amHave(t);
+  AMP.models = AMP.models.filter((m) => !have.has(m)); AMP.picked = new Set([...AMP.picked].filter((m) => !have.has(m)));
+  if (have.has(AMP.custom)) AMP.custom = "";
+  AMP.busy = false; AMP.err = true; AMP.status = (ok ? `${ok} added. ` : "") + failed.join("  ·  ");
+  renderAISettings(); refreshAIChrome(); renderModelPicker();
+}
+
+// The add-models panel is redrawn with the rest of the settings, so its fields are read through these listeners.
+$("aimodels").addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-am]");
+  if (cb && AMP) cb.checked ? AMP.picked.add(cb.dataset.am) : AMP.picked.delete(cb.dataset.am);
+});
+$("aimodels").addEventListener("input", (e) => {
+  if (!AMP) return;
+  if (e.target.id === "amfilter") { AMP.filter = e.target.value; $("amlist").innerHTML = amListHTML(); }
+  if (e.target.id === "amcustom") AMP.custom = e.target.value;
+});
 function showAIResult(r) {
   const el = $("airesult");
   el.className = "note " + (r.ok ? "okmsg" : "err");
@@ -355,6 +447,9 @@ document.addEventListener("click", async (e) => {
       $("airemember").checked = el.dataset.v === "1"; store.set("rememberKeys", el.dataset.v === "1" ? "1" : "");
       syncProviderFields();
     } else if (act === "aiadd") { aiAdding = true; renderAISettings(); $("aikey").focus(); }
+    else if (act === "amopen") amOpen(el.dataset.id);
+    else if (act === "amcancel") { AMP = null; renderAISettings(); }
+    else if (act === "amgo") await amGo();
     else if (act === "aimodel") { aiModelOpen = !aiModelOpen; syncProviderFields(); if (aiModelOpen) $("aimodelin").focus(); }
     else if (act === "invites") { $("acctdlg").close(); openInvites(); }
     else if (act === "invcreate") {
@@ -378,6 +473,7 @@ document.addEventListener("click", async (e) => {
       await loadInvites();
     }
     else if (act === "report") { reportId = Number(el.dataset.id); $("reportdlg").showModal(); }
+    else if (act === "backacct") { $(el.dataset.from).close(); openAccount(); }
     else if (act === "mod") { $("acctdlg").close(); openModeration(); }
     else if (act === "mact") {
       await json("POST", `/api/admin/perspectives/${el.dataset.id}/${el.dataset.do}`, {});
@@ -1634,7 +1730,7 @@ $("termsdlg").addEventListener("cancel", (e) => e.preventDefault()); // cannot b
 
 function openAccount() {
   $("acctemail").textContent = me ? `Signed in as ${me.email}` : "";
-  $("acctname").value = me?.displayName || ""; $("modbtn").hidden = !me?.isAdmin; $("invbtn").hidden = !me?.isAdmin; $("fbbtn").hidden = !me?.isAdmin; setFbBadge(me?.feedbackNew || 0);
+  $("acctname").value = me?.displayName || ""; $("modbtn").hidden = !me?.isAdmin; $("invbtn").hidden = !me?.isAdmin; $("fbbtn").hidden = !me?.isAdmin; $("adminsec").hidden = !me?.isAdmin; setFbBadge(me?.feedbackNew || 0);
   $("delpw").value = ""; $("acctdlg").showModal();
 }
 $("acctnamesave").onclick = async () => {

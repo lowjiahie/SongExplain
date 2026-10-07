@@ -75,6 +75,7 @@ function geminiEffort(cfg) {
   if (!/gemini-(2\.5|3)/.test(m)) return null;
   return /pro/.test(m) ? "low" : "none";
 }
+const TRANSIENT = new Set([500, 502, 503, 504]); // temporary provider-side trouble, worth a quick retry
 export async function* streamChat(cfg, { system, user, maxTokens, info = {} }) {
   if (cfg.provider === "anthropic") {
     const client = new Anthropic({ apiKey: cfg.apiKey });
@@ -106,8 +107,16 @@ export async function* streamChat(cfg, { system, user, maxTokens, info = {} }) {
   // Gemini 2.5+ "thinks" before answering, and those hidden thinking tokens are counted against the output limit —
   // so a 3000-token limit can be used up before the explanation has really started. Keep the thinking minimal.
   const effort = geminiEffort(cfg);
-  let res = await post(effort ? { reasoning_effort: effort } : {});
-  if (!res.ok && effort && res.status === 400) res = await post({}); // this model rejects the setting: send it without
+  const postRetry = async (extra) => {
+    let r = await post(extra);
+    for (let i = 0; !r.ok && TRANSIENT.has(r.status) && i < 2; i++) { // provider overloaded: nothing was streamed yet, so retrying is safe
+      await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));
+      r = await post(extra);
+    }
+    return r;
+  };
+  let res = await postRetry(effort ? { reasoning_effort: effort } : {});
+  if (!res.ok && effort && res.status === 400) res = await postRetry({}); // this model rejects the setting: send it without
   if (!res.ok) {
     const body = (await res.text().catch(() => "")).slice(0, 300);
     throw Object.assign(new Error(`${cfg.label} error ${res.status}: ${body}`), { status: res.status });
@@ -153,6 +162,7 @@ export function friendlyError(e, cfg) {
   const label = cfg?.label || "AI";
   if (e?.status === 401 || e?.status === 403) return `Your ${label} API key was rejected. Check it in AI settings.`;
   if (e?.status === 429) return `Rate limit or no credit on your ${label} account.`;
+  if (TRANSIENT.has(e?.status)) return `${label} is overloaded right now. This is temporary and not a problem with your key — try again in a minute.`;
   return redact(e?.message || "Unknown error", cfg?.apiKey);
 }
 
@@ -164,7 +174,8 @@ function testErrorMessage(e, cfg) {
   const s = e?.status;
   if (e?.name === "TimeoutError" || e?.name === "AbortError") return `Timed out after ${TEST_TIMEOUT_MS / 1000}s — the provider did not answer.`;
   if (s === 401 || s === 403) return `${cfg.short || cfg.label} rejected the API key.`;
-  if (s === 404) return `Model "${cfg.model}" was not found for this account.`;
+  if (s === 404) return `Model "${cfg.model}" is not available for this API key. Google retires models and limits some to certain accounts — pick another from the list${cfg.provider === "gemini" ? " (for example gemini-3.6-flash)" : ""}.`;
+  if (TRANSIENT.has(s)) return `${cfg.short || cfg.label} is overloaded right now (temporary, not a problem with your key). Try again in a minute, or pick another model.`;
   if (s === 429) return `${cfg.short || cfg.label} accepted the key but is rate-limiting it, or the account is out of credit.`;
   if (!s && /fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ECONNRESET/i.test(String(e?.message + " " + e?.cause?.code))) return "Could not reach the provider. Check the base URL and your network.";
   return redact(String(e?.message || "Connection failed").slice(0, 220), cfg.apiKey);
@@ -173,6 +184,14 @@ function testErrorMessage(e, cfg) {
 // Sends one tiny request with the exact provider + model + key. Returns { ok, ms, error? }.
 export async function testConnection(cfg) {
   const t0 = Date.now();
+  let r = await testOnce(cfg, t0);
+  for (let i = 0; !r.ok && TRANSIENT.has(r.status) && i < 2; i++) { // overloaded: give it a moment and try again
+    await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));
+    r = await testOnce(cfg, t0);
+  }
+  return r;
+}
+async function testOnce(cfg, t0) {
   const signal = AbortSignal.timeout(TEST_TIMEOUT_MS);
   try {
     if (cfg.provider === "anthropic") {

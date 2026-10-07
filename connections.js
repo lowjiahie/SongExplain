@@ -88,6 +88,20 @@ aiRouter.get("/", (req, res) => {
   });
 });
 
+// The models a key can use, so several can be added without pasting the key again.
+// Uses the saved key for that provider, or a key sent with this request (a "this visit only" key).
+aiRouter.post("/discover", testLimit, async (req, res) => {
+  try {
+    const p = PROVIDERS[String(req.body?.provider || "")];
+    if (!p) return bad(res, "Unknown provider", 404);
+    req.body.model = req.body.model || p.model || "x"; // only needed to build a config; nothing is sent to the model
+    const { cfg } = resolve(req);
+    res.json({ models: await discoverModels(cfg) });
+  } catch (e) {
+    bad(res, redact(e.message), e.status || 400);
+  }
+});
+
 // Test without saving anything. If it works, also list the models this key can use.
 aiRouter.post("/test", testLimit, async (req, res) => {
   try {

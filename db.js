@@ -131,6 +131,11 @@ const groupKeyOf = (title, artist) => `${canonTitle(title)}|${canonArtist(artist
 if (!hasCol("songs", "group_key")) db.exec("ALTER TABLE songs ADD COLUMN group_key TEXT");
 if (!hasCol("songs", "group_checked")) db.exec("ALTER TABLE songs ADD COLUMN group_checked INTEGER NOT NULL DEFAULT 0");
 for (const [c, def] of [["cover_token", "TEXT"], ["album_key", "TEXT"], ["linked_note", "TEXT"]]) if (!hasCol("songs", c)) db.exec(`ALTER TABLE songs ADD COLUMN ${c} ${def}`);
+// lyrics_auto = the stored lyrics were fetched online (not typed or pasted by the owner), so the AI is still told they may be wrong.
+if (!hasCol("songs", "lyrics_auto")) {
+  db.exec("ALTER TABLE songs ADD COLUMN lyrics_auto INTEGER NOT NULL DEFAULT 0");
+  db.exec("UPDATE songs SET lyrics_auto = 1 WHERE lyrics IS NOT NULL AND source = 'catalog'"); // earlier versions fetched them for catalog songs
+}
 db.exec("CREATE INDEX IF NOT EXISTS idx_songs_group ON songs(group_key)");
 for (const r of db.prepare("SELECT id, cover, album FROM songs WHERE cover_token IS NULL AND album_key IS NULL").all())
   db.prepare("UPDATE songs SET cover_token = ?, album_key = ? WHERE id = ?").run(coverToken(r.cover), albumKeyOf(r.album), r.id);
@@ -174,7 +179,7 @@ export function upsertSong(userId, { title, artist, album, year, cover, source =
   const key = songKey(title, artist);
   const found = db.prepare("SELECT * FROM songs WHERE user_id = ? AND key = ?").get(userId, key);
   if (found) {
-    if (lyrics?.trim()) db.prepare("UPDATE songs SET lyrics = ? WHERE id = ?").run(lyrics.trim(), found.id);
+    if (lyrics?.trim()) db.prepare("UPDATE songs SET lyrics = ?, lyrics_auto = 0 WHERE id = ?").run(lyrics.trim(), found.id);
     return getSong(userId, found.id);
   }
   const info = db
@@ -187,8 +192,13 @@ export function upsertSong(userId, { title, artist, album, year, cover, source =
 
 export const getSong = (userId, id) => publicSong(db.prepare("SELECT * FROM songs WHERE id = ? AND user_id = ?").get(id, userId));
 export const getSongLyrics = (userId, id) => db.prepare("SELECT lyrics FROM songs WHERE id = ? AND user_id = ?").get(id, userId)?.lyrics || null;
-export const setLyrics = (userId, id, lyrics) =>
-  db.prepare("UPDATE songs SET lyrics = ? WHERE id = ? AND user_id = ?").run(lyrics?.trim() || null, id, userId);
+export const getSongLyricsInfo = (userId, id) => {
+  const r = db.prepare("SELECT lyrics, lyrics_auto FROM songs WHERE id = ? AND user_id = ?").get(id, userId);
+  return { lyrics: r?.lyrics || null, auto: !!r?.lyrics_auto };
+};
+// auto = true when the text was fetched online; false when the owner typed or pasted it.
+export const setLyrics = (userId, id, lyrics, auto = false) =>
+  db.prepare("UPDATE songs SET lyrics = ?, lyrics_auto = ? WHERE id = ? AND user_id = ?").run(lyrics?.trim() || null, auto && lyrics?.trim() ? 1 : 0, id, userId);
 export const deleteSong = (userId, id) => db.prepare("DELETE FROM songs WHERE id = ? AND user_id = ?").run(id, userId);
 
 export const listSongs = (userId) =>

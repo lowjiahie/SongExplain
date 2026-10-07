@@ -1,7 +1,7 @@
 import * as OpenCC from "opencc-js";
 
 // Online lyrics lookup across several free sources. Each source returns plain text or null.
-// Order depends on the song: Chinese titles try NetEase first, others try LRCLIB first.
+// Order depends on the song: Chinese titles try NetEase first, others try LRCLIB first; Kugou and lyrics.ovh are fallbacks.
 export const toSimplified = OpenCC.Converter({ from: "tw", to: "cn" });
 
 export const stripNoise = (s) =>
@@ -50,6 +50,12 @@ export async function getJson(url, headers = {}) {
 const enc = encodeURIComponent;
 
 async function fromLrclib(artist, title) {
+  const hit = await lrclibOnce(artist, title);
+  if (hit) return hit;
+  const st = toSimplified(stripNoise(title)), sa = toSimplified(stripNoise(artist));
+  return st !== stripNoise(title) || sa !== stripNoise(artist) ? lrclibOnce(sa, st) : null; // 魚 vs 鱼: the database may use either
+}
+async function lrclibOnce(artist, title) {
   const t = stripNoise(title), a = stripNoise(artist);
   const exact = await getJson(`https://lrclib.net/api/get?artist_name=${enc(a)}&track_name=${enc(t)}`);
   if (usable(exact?.plainLyrics)) return exact.plainLyrics;
@@ -91,12 +97,52 @@ async function fromLyricsOvh(artist, title) {
   return usable(j?.lyrics) ? j.lyrics.trim() : null;
 }
 
-// Returns { text, source } or null.
+// Kugou (unofficial public endpoints) — large Chinese catalogue, and plenty of English / Japanese / Korean / Malay pop.
+const DERIVATIVE_TITLE = /伴奏|karaoke|ktv|instrumental|cover|翻唱|remix|dj|live|现场|纯音乐/i;
+const uniq = (xs) => [...new Set(xs.filter(Boolean))];
+async function fromKugou(artist, title) {
+  const t = stripNoise(title), a = stripNoise(artist);
+  for (const q of uniq([`${toSimplified(t)} ${toSimplified(a)}`, `${t} ${a}`, toSimplified(t)])) {
+    const s = await getJson(`https://mobileservice.kugou.com/api/v3/search/song?format=json&keyword=${enc(q)}&page=1&pagesize=10`);
+    const songs = (s?.data?.info || []).filter((x) => looseEq(x.songname, t) && !DERIVATIVE_TITLE.test(x.songname) && x.hash);
+    const sameArtist = (x) => String(x.singername || "").split(/[、,&，]/).some((n) => looseEq(n, a));
+    // "Jay Chou" vs "周杰伦": different scripts can't be compared, so accept an exact title match from the first result
+    const crossScript = (x) => hasCJK(x.singername || "") !== hasCJK(a) && flat(x.songname) === flat(t);
+    const hit = songs.find(sameArtist) || songs.find(crossScript);
+    if (!hit) continue;
+    const c = await getJson(`https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${enc(hit.songname)}&hash=${hit.hash}&duration=${(hit.duration || 0) * 1000}`);
+    const cand = (c?.candidates || [])[0];
+    if (!cand) continue;
+    const d = await getJson(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${cand.accesskey}&fmt=lrc&charset=utf8`);
+    if (!d?.content) continue;
+    let text = cleanLrc(Buffer.from(d.content, "base64").toString("utf8"));
+    text = text.split(/\r?\n/).filter((l, i) => !(i === 0 && /^.{1,40}\s-\s.{1,80}$/.test(l.trim()))).join("\n").trim(); // "Artist - Title" header line
+    if (usable(text)) return text;
+  }
+  return null;
+}
+
+// Looking up lyrics hits several free sites, so remember the answer for a while: a hit for 6 hours, a miss for 20 minutes
+// (so pressing Explain again on a song nobody has lyrics for doesn't repeat the whole search every time).
+const LYRIC_CACHE = new Map(); // key -> { exp, value: Promise<{text, source}|null> }
 export async function fetchLyrics(artist, title) {
+  const key = flat(artist) + "|" + flat(stripNoise(title));
+  const hit = LYRIC_CACHE.get(key);
+  if (hit && hit.exp > Date.now()) return hit.value;
+  const value = findLyrics(artist, title).catch(() => null);
+  LYRIC_CACHE.set(key, { exp: Date.now() + 20 * 60_000, value });
+  value.then((r) => { if (r) LYRIC_CACHE.get(key).exp = Date.now() + 6 * 3600_000; });
+  if (LYRIC_CACHE.size > 500) LYRIC_CACHE.delete(LYRIC_CACHE.keys().next().value);
+  return value;
+}
+
+// Returns { text, source } or null.
+async function findLyrics(artist, title) {
   const chinese = hasCJK(title) || hasCJK(artist);
   const sources = [
     ["LRCLIB", fromLrclib],
     ["NetEase", fromNetease],
+    ["Kugou", fromKugou],
     ["lyrics.ovh", fromLyricsOvh],
   ];
   if (chinese) sources.unshift(sources.splice(1, 1)[0]); // NetEase first for Chinese
@@ -106,3 +152,5 @@ export async function fetchLyrics(artist, title) {
   }
   return null;
 }
+
+export { fromLrclib, fromNetease, fromLyricsOvh, fromKugou }; // exported so each source can be measured on its own

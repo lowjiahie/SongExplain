@@ -344,7 +344,7 @@ app.post("/api/songs/:id/lyrics/find", viewsLimit, async (req, res) => {
     const found = await fetchLyrics(song.artist, song.title);
     if (!found) return bad(res, "Couldn't find the lyrics online. Paste them under “Lyrics”, or write your own words.", 422);
     lyrics = found.text;
-    db.setLyrics(req.user.id, song.id, lyrics);
+    db.setLyrics(req.user.id, song.id, lyrics, true);
   }
   res.json({ lyrics });
 });
@@ -368,15 +368,17 @@ app.post("/api/songs/:id/explain", aiLimit, async (req, res) => {
   res.on("close", () => { if (!res.writableEnded) aborted = true; });
 
   // Find the lyrics first. No lyrics => no explanation (we never let the AI guess), and no AI cost.
-  let lyrics = db.getSongLyrics(req.user.id, song.id);
-  let autoFound = false;
+  // Lyrics already stored for this song are used as they are — nothing is looked up again.
+  const stored = db.getSongLyricsInfo(req.user.id, song.id);
+  let lyrics = stored.lyrics;
+  let autoFound = stored.auto; // fetched online earlier: the AI is still told they might not match
   if (!lyrics) {
     const found = await fetchLyrics(song.artist, song.title);
     if (found) {
       lyrics = found.text;
       autoFound = true;
       console.log(`lyrics found for "${song.title}" via ${found.source}`);
-      db.setLyrics(req.user.id, song.id, lyrics); // keep privately so we don't search again
+      db.setLyrics(req.user.id, song.id, lyrics, true); // keep privately so we don't search again
     } else {
       console.log(`lyrics NOT found for "${song.title}" - "${song.artist}"`);
     }
@@ -409,13 +411,13 @@ app.post("/api/songs/:id/explain", aiLimit, async (req, res) => {
       (ctx.wiki ? `\n\n<background_notes source="Wikipedia: ${ctx.wiki.title}">\n${ctx.wiki.text}\n</background_notes>` : "");
     let text = "";
     const info = {};
-    for await (const t of streamChat(cfg, { system: SYSTEM, user: prompt, maxTokens: 3000, info })) {
+    for await (const t of streamChat(cfg, { system: SYSTEM, user: prompt, maxTokens: 4000, info })) {
       if (aborted) return; // leaving the loop cancels the upstream AI request
       text += t;
       res.write(t);
     }
     if (info.truncated) {
-      const note = "\n\n> ⚠️ The AI reached its output length limit, so this explanation was cut off. Press Explain again, or choose a model with a larger output limit.";
+      const note = "\n\n> ⚠️ The AI reached its output length limit, so this explanation was cut off. Press Explain again. If it keeps happening, pick a non-“thinking” model (e.g. a Flash or mini model) in the model menu.";
       text += note;
       res.write(note);
     }

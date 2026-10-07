@@ -499,6 +499,24 @@ document.addEventListener("click", async (e) => {
       syncProviderFields();
     } else if (act === "aiadd") { aiAdding = true; renderAISettings(); $("aikey").focus(); }
     else if (act === "fimg") await saveFeelingImage(Number(el.dataset.fid));
+    else if (act === "lyrsize") { store.set("lyrSize", el.dataset.v); applyLyrSize(); }
+    else if (act === "lyrcopy") { await navigator.clipboard.writeText(LYR.text); toast("Lyrics copied"); }
+    else if (act === "lyredit") showLyrEdit(true);
+    else if (act === "lyrsync") {
+      if (!curSong.lyrics_auto && !confirm("Sync looks the lyrics up online again and REPLACES the ones saved here — including anything you pasted or edited yourself.\n\nContinue?")) return;
+      el.disabled = true; el.textContent = "Syncing…";
+      try {
+        const d = await json("POST", `/api/songs/${curSong.id}/lyrics/find`, { refresh: true });
+        const same = String(d.lyrics).trim() === LYR.text.trim();
+        toast(same ? "Already up to date — the online version is the same" : `Lyrics synced from ${d.source || "online"}`);
+        if (!same) renderSong(curSong.id); else { el.disabled = false; el.textContent = "Sync lyrics"; }
+      } catch (e) { toast(e.message + " Your saved lyrics were not changed.", "err"); el.disabled = false; el.textContent = "Sync lyrics"; }
+    }
+    else if (act === "lyrfind") {
+      el.disabled = true; el.textContent = "Looking…";
+      try { await json("POST", `/api/songs/${curSong.id}/lyrics/find`, {}); toast("Lyrics found"); renderSong(curSong.id); }
+      catch (e) { toast(e.message, "err"); el.disabled = false; el.textContent = "Find lyrics online"; }
+    }
     else if (act === "emore") { const card = el.closest(".entry"), open = card.classList.toggle("open"); el.textContent = open ? "Show less ↑" : "Read more ↓"; el.setAttribute("aria-expanded", String(open)); }
     else if (act === "amopen") amOpen(el.dataset.id);
     else if (act === "amcancel") { AMP = null; renderAISettings(); }
@@ -632,6 +650,39 @@ $("dupdlg").addEventListener("click", (e) => { const b = e.target.closest("[data
 $("dupnew").onclick = () => dupResolve?.("new");
 $("dupcancel").onclick = () => dupResolve?.(null);
 $("dupdlg").addEventListener("cancel", () => dupResolve?.(null));
+
+/* ---------- Lyrics tab: a reading view first; "Edit" is for pasting or fixing ---------- */
+const LYR_SIZES = ["1.02rem", "1.2rem", "1.45rem"];
+let LYR = { text: "" };
+const lyrSize = () => Math.min(2, Math.max(0, Number(store.get("lyrSize") ?? 1) || 0));
+// Verses are separated by blank lines; a lone "[Chorus]" style line becomes a small section label.
+function lyricsViewHTML(text) {
+  const marker = (l) => /^[\[\(（【].{1,30}[\]\)）】]$/.test(l.trim());
+  return String(text).replace(/\r\n/g, "\n").trim().split(/\n\s*\n/).map((st) => {
+    let lines = st.split("\n").map((l) => l.trimEnd()), out = "";
+    if (marker(lines[0])) { out = `<p class="lyr-tag">${esc(lines[0].trim().slice(1, -1))}</p>`; lines = lines.slice(1); }
+    return out + (lines.length ? `<p class="stz">${lines.map(esc).join("<br>")}</p>` : "");
+  }).join("");
+}
+function applyLyrSize() {
+  const v = lyrSize(), view = $("lyrview");
+  if (view) view.style.setProperty("--lyr", LYR_SIZES[v]);
+  document.querySelectorAll("#lyrtools [data-act=lyrsize]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.v) === v)));
+}
+function showLyrEdit(on) {
+  $("lyrread").hidden = on; $("lyredit").hidden = !on;
+  if (on) { $("lyr").value = LYR.text; $("lyr").focus(); }
+}
+function setLyricsText(song, text) {
+  LYR.text = String(text || "");
+  const has = !!LYR.text.trim();
+  $("lyrview").innerHTML = has ? lyricsViewHTML(LYR.text) : "";
+  $("lyrtools").hidden = !has; $("lyrview").hidden = !has; $("lyrempty").hidden = has;
+  $("lyrsrc").textContent = has ? (song.lyrics_auto ? "Found online — check it is the right song" : "Added by you") : "";
+  const n = LYR.text.split(/\r?\n/).filter((l) => l.trim()).length;
+  $("lyrcount").textContent = has ? `${n} lines` : "";
+  applyLyrSize();
+}
 
 /* ---------- Home: search results + library ---------- */
 async function renderHome() {
@@ -906,7 +957,10 @@ function renderCandidates() {
 /* ---------- Song page ---------- */
 let curSong = null;
 let curTab = "explain";
-let curLang = store.get("lang") || "English";
+// The language AI explanations are written in: the saved preference (Account → Profile, default 简体中文).
+// The language buttons on a song only change it for that visit.
+const prefLang = () => (LANGS.includes(me?.prefLang) ? me.prefLang : "简体中文");
+let curLang = "简体中文";
 
 function showTab(name) {
   curTab = name;
@@ -915,7 +969,7 @@ function showTab(name) {
   if (name === "community" && curSong && !COMM.loaded) loadCommunity(curSong);
 }
 function setLang(l) {
-  curLang = l; store.set("lang", l);
+  curLang = l;
   document.querySelectorAll("#langseg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === l)));
 }
 /* ---------- my feelings: free-form feeling words ---------- */
@@ -1296,17 +1350,34 @@ async function renderSong(id) {
     </section>
 
     <section class="panel col" id="p-lyrics" hidden>
-      <span class="lab">Lyrics — private, on this computer only</span>
-      <p class="note">When you press Explain, the app looks the lyrics up automatically and saves them here. If it can't find them it will not guess — paste them yourself, and check they are the right song.</p>
-      <textarea id="lyr" style="min-height:300px" placeholder="Paste lyrics here"></textarea>
-      <div class="row" style="margin-top:14px"><button class="btn ghost" id="savelyr">Save lyrics</button></div>
+      <div class="lyr-head"><span class="lab">Lyrics</span><span class="lyr-src" id="lyrsrc"></span></div>
+      <p class="note lyr-note">Private to you — nobody else can see them. They are only used to help the AI explain this song. When you press Explain the app looks them up for you; if it can’t find them it will not guess.</p>
+      <div id="lyrread">
+        <div class="lyr-tools" id="lyrtools" hidden>
+          <span class="mono">Text size</span>
+          <span class="lyr-sz">${["S", "M", "L"].map((l, i) => `<button type="button" data-act="lyrsize" data-v="${i}" aria-pressed="false" aria-label="Text size ${l}">${l}</button>`).join("")}</span>
+          <span class="mono" id="lyrcount"></span>
+          <span class="push"><button class="link" data-act="lyrsync" type="button" title="Look the lyrics up online again and replace what is saved here">Sync lyrics</button><button class="link" data-act="lyrcopy" type="button">Copy</button><button class="link" data-act="lyredit" type="button">Edit</button></span>
+        </div>
+        <article class="lyr-view" id="lyrview" hidden></article>
+        <div class="lyr-empty" id="lyrempty" hidden>
+          <p class="lyr-empty-t">No lyrics saved for this song yet</p>
+          <p class="note">Let the app look for them online, or paste them yourself. Please check they are the right song.</p>
+          <div class="row"><button class="btn" data-act="lyrfind" type="button">Find lyrics online</button><button class="btn ghost" data-act="lyredit" type="button">Paste my own</button></div>
+        </div>
+      </div>
+      <div id="lyredit" hidden>
+        <label class="lyr-label" for="lyr">Paste or fix the lyrics — leave a blank line between verses</label>
+        <textarea id="lyr" placeholder="Paste lyrics here"></textarea>
+        <div class="row" style="margin-top:14px"><button class="btn" id="savelyr" type="button">Save lyrics</button><button class="btn ghost" id="lyrcancel" type="button">Cancel</button></div>
+      </div>
     </section>
   </div>`;
 
   showTab(curTab);
   renderModelPicker();
   document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
-  setLang(curLang);
+  setLang(prefLang());
   document.querySelectorAll("#langseg button").forEach((b) => (b.onclick = () => setLang(b.dataset.lang)));
   setMood("");
   setDesign("paper");
@@ -1327,7 +1398,9 @@ async function renderSong(id) {
 
   $("cardbtn").onclick = () => openCard(song);
   $("delsong").onclick = async () => { if (confirm("Delete this song and everything you saved for it?")) { await json("DELETE", "/api/songs/" + id); toast("Song deleted"); location.hash = "#/"; } };
-  if (song.hasLyrics) json("GET", `/api/songs/${id}/lyrics`).then((r) => { if ($("lyr")) $("lyr").value = r.lyrics; }).catch(() => {});
+  setLyricsText(song, "");
+  if (song.hasLyrics) json("GET", `/api/songs/${id}/lyrics`).then((r) => { if ($("lyrview")) setLyricsText(song, r.lyrics); }).catch(() => {});
+  $("lyrcancel").onclick = () => showLyrEdit(false);
   $("savelyr").onclick = async () => { await json("PUT", `/api/songs/${id}/lyrics`, { lyrics: $("lyr").value }); toast("Lyrics saved"); renderSong(id); };
   $("explain").onclick = () => explain(song);
   $("padd").onclick = async () => {
@@ -1587,7 +1660,7 @@ async function openModeration() {
 }
 
 /* ---------- Listeners (comments) ---------- */
-const V = { items: [], seen: new Set(), shown: 0, nOffset: 0, nMore: true, nTotal: 0, ytToken: null, ytMore: true, ytVideo: null, wiki: null };
+const V = { items: [], seen: new Set(), shown: 0, nOffset: 0, nMore: true, nTotal: 0, ytToken: null, ytMore: true, ytVideo: null, wiki: null, reddit: null };
 const VCHUNK = 12;
 
 function addViews(list, source) {
@@ -1597,7 +1670,7 @@ function addViews(list, source) {
     V.items.push({ ...v, source });
   }
 }
-const viewCard = (v) => `<div class="cm"><span class="lab">${esc(v.source)} · ${v.likes.toLocaleString()} likes</span><p>${esc(v.text)}</p></div>`;
+const viewCard = (v) => `<div class="cm"><span class="lab">${esc(v.source)}${v.likes == null ? "" : ` · ${v.likes.toLocaleString()} likes`}</span><p>${esc(v.text)}</p></div>`;
 
 function renderViews(song) {
   const box = $("views");
@@ -1619,14 +1692,16 @@ function renderViews(song) {
       ${canMore && V.items.length ? `<button class="btn ghost" id="vmore">Show more${V.shown >= V.items.length ? " (load next page)" : ""}</button>` : ""}
       ${hasYt && V.ytMore ? `<button class="btn ghost" id="vyt">${V.ytVideo ? "More" : "Load"} YouTube comments</button>` : ""}
       ${!hasYt ? `<button class="btn ghost" data-act="settings">+ Add YouTube comments</button>` : ""}
+      ${!V.reddit ? `<button class="btn ghost" id="vreddit">Load Reddit discussions</button>` : ""}
       <span id="vmstat" class="note" style="margin:0"></span>
     </div>
-    <p class="note" style="margin-top:26px">${V.items.length} comments loaded${V.nTotal ? ` (NetEase has about ${V.nTotal.toLocaleString()})` : ""} — a sample of public listener comments, not everyone. Names are not shown.${V.ytVideo ? ` YouTube video: <a target="_blank" rel="noopener" href="${esc(V.ytVideo.url)}">${esc(V.ytVideo.title)}</a>.` : ""}${V.wiki ? ` Background: <a target="_blank" rel="noopener" href="${esc(V.wiki.url)}">Wikipedia – ${esc(V.wiki.title)}</a>.` : ""}</p>
+    <p class="note" style="margin-top:26px">${V.items.length} comments loaded${V.nTotal ? ` (NetEase has about ${V.nTotal.toLocaleString()})` : ""} — a sample of public listener comments, not everyone. Names are not shown.${V.ytVideo ? ` YouTube video: <a target="_blank" rel="noopener" href="${esc(V.ytVideo.url)}">${esc(V.ytVideo.title)}</a>.` : ""}${V.reddit?.threads?.length ? ` Reddit: ${V.reddit.threads.map((t) => `<a target="_blank" rel="noopener" href="${esc(t.url)}">${esc(t.title)}</a>`).join(" · ")}.` : ""}${V.wiki ? ` Background: <a target="_blank" rel="noopener" href="${esc(V.wiki.url)}">Wikipedia – ${esc(V.wiki.title)}</a>.` : ""}</p>
     <span class="lab" style="margin-top:30px">Keep exploring</span>${links}`;
 
   if ($("vsum")) $("vsum").onclick = () => summarizeViews(song);
   if ($("vmore")) $("vmore").onclick = () => showMoreViews(song);
   if ($("vyt")) $("vyt").onclick = () => loadYoutube(song);
+  if ($("vreddit")) $("vreddit").onclick = () => loadReddit(song);
 }
 
 async function loadNetease(song) {
@@ -1649,6 +1724,21 @@ async function showMoreViews(song) {
   renderViews(song);
 }
 
+// Reddit discussions about the song (public RSS, no key). Reddit sometimes asks servers to slow down — then say so.
+async function loadReddit(song) {
+  $("vreddit").disabled = true; $("vmstat").textContent = "Looking on Reddit…";
+  try {
+    const d = await json("GET", `/api/songs/${song.id}/views?source=reddit`);
+    if (d.busy) { $("vreddit").disabled = false; $("vmstat").textContent = ""; toast("Reddit is asking us to slow down. Try again in a few minutes.", "err"); return; }
+    V.reddit = d;
+    const before = V.items.length;
+    addViews(d.items, "Reddit");
+    V.shown = Math.min(V.shown + (V.items.length - before), V.items.length);
+    renderViews(song);
+    toast(d.items.length ? `${d.items.length} Reddit comments added` : "No Reddit discussion found for this song.");
+  } catch (e) { toast(e.message, "err"); if ($("vreddit")) { $("vreddit").disabled = false; $("vmstat").textContent = ""; } }
+}
+
 async function loadYoutube(song) {
   $("vyt").disabled = true; $("vmstat").textContent = "Loading YouTube comments…";
   try {
@@ -1668,7 +1758,7 @@ async function loadYoutube(song) {
 }
 
 async function loadViews(song) {
-  Object.assign(V, { items: [], seen: new Set(), shown: 0, nOffset: 0, nMore: true, nTotal: 0, ytToken: null, ytMore: true, ytVideo: null, wiki: null });
+  Object.assign(V, { items: [], seen: new Set(), shown: 0, nOffset: 0, nMore: true, nTotal: 0, ytToken: null, ytMore: true, ytVideo: null, wiki: null, reddit: null });
   try {
     await loadNetease(song);
     V.shown = Math.min(VCHUNK, V.items.length);
@@ -2078,9 +2168,15 @@ $("termsdlg").addEventListener("cancel", (e) => e.preventDefault()); // cannot b
 
 function openAccount() {
   $("acctemail").textContent = me ? `Signed in as ${me.email}` : "";
-  $("acctname").value = me?.displayName || ""; $("modbtn").hidden = !me?.isAdmin; $("invbtn").hidden = !me?.isAdmin; $("fbbtn").hidden = !me?.isAdmin; $("adminsec").hidden = !me?.isAdmin; setFbBadge(me?.feedbackNew || 0);
+  $("acctname").value = me?.displayName || ""; $("acctlang").value = prefLang(); $("modbtn").hidden = !me?.isAdmin; $("invbtn").hidden = !me?.isAdmin; $("fbbtn").hidden = !me?.isAdmin; $("adminsec").hidden = !me?.isAdmin; setFbBadge(me?.feedbackNew || 0);
   $("delpw").value = ""; $("acctdlg").showModal();
 }
+$("acctlang").onchange = async () => {
+  try {
+    const d = await json("PUT", "/api/auth/preferences", { language: $("acctlang").value });
+    me.prefLang = d.prefLang; setLang(d.prefLang) ; toast("Language preference saved");
+  } catch (e) { toast(e.message, "err"); $("acctlang").value = prefLang(); }
+};
 $("acctnamesave").onclick = async () => {
   try { const d = await json("PUT", "/api/auth/profile", { displayName: $("acctname").value }); me.displayName = d.displayName; toast("Display name saved"); }
   catch (e) { toast(e.message, "err"); }

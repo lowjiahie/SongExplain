@@ -88,6 +88,8 @@ if (!cols.length) {
 /* ---------- community (opt-in sharing of a feeling) ---------- */
 const hasCol = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
 if (!hasCol("users", "display_name")) db.exec("ALTER TABLE users ADD COLUMN display_name TEXT");
+// The language the person wants AI explanations written in (default 简体中文).
+if (!hasCol("users", "pref_lang")) db.exec("ALTER TABLE users ADD COLUMN pref_lang TEXT");
 // Which version of the Terms/Privacy Notice the user accepted, and when (consent record).
 if (!hasCol("users", "terms_version")) db.exec("ALTER TABLE users ADD COLUMN terms_version TEXT");
 if (!hasCol("users", "terms_accepted_at")) db.exec("ALTER TABLE users ADD COLUMN terms_accepted_at TEXT");
@@ -153,7 +155,8 @@ export const createUser = (email, passHash) => {
   return id;
 };
 export const getUserByEmail = (email) => db.prepare("SELECT * FROM users WHERE email = ?").get(email);
-export const getUserById = (id) => db.prepare("SELECT id, email, display_name, terms_version, created_at FROM users WHERE id = ?").get(id);
+export const getUserById = (id) => db.prepare("SELECT id, email, display_name, pref_lang, terms_version, created_at FROM users WHERE id = ?").get(id);
+export const setPrefLang = (userId, lang) => db.prepare("UPDATE users SET pref_lang = ? WHERE id = ?").run(lang, userId);
 export const countUsers = () => db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
 export const deleteUser = (id) => db.prepare("DELETE FROM users WHERE id = ?").run(id);
 

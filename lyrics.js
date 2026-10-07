@@ -125,10 +125,11 @@ async function fromKugou(artist, title) {
 // Looking up lyrics hits several free sites, so remember the answer for a while: a hit for 6 hours, a miss for 20 minutes
 // (so pressing Explain again on a song nobody has lyrics for doesn't repeat the whole search every time).
 const LYRIC_CACHE = new Map(); // key -> { exp, value: Promise<{text, source}|null> }
-export async function fetchLyrics(artist, title) {
+// fresh: true skips the remembered answer (used by the "Sync lyrics" button).
+export async function fetchLyrics(artist, title, { fresh = false } = {}) {
   const key = flat(artist) + "|" + flat(stripNoise(title));
   const hit = LYRIC_CACHE.get(key);
-  if (hit && hit.exp > Date.now()) return hit.value;
+  if (hit && hit.exp > Date.now() && !fresh) return hit.value;
   const value = findLyrics(artist, title).catch(() => null);
   LYRIC_CACHE.set(key, { exp: Date.now() + 20 * 60_000, value });
   value.then((r) => { if (r) LYRIC_CACHE.get(key).exp = Date.now() + 6 * 3600_000; });

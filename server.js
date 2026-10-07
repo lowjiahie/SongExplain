@@ -2,7 +2,7 @@ import express from "express";
 import * as db from "./db.js";
 import * as auth from "./auth.js";
 import { fetchLyrics } from "./lyrics.js";
-import { gatherContext, neteasePage, youtubePage } from "./context.js";
+import { gatherContext, neteasePage, youtubePage, redditPage } from "./context.js";
 import { streamChat, chat, publicProviders, friendlyError } from "./llm.js";
 import { llmConfig, youtubeKey, aiRouter } from "./connections.js";
 import * as secrets from "./secrets.js";
@@ -50,7 +50,10 @@ const MAX_USERS = Math.max(0, Math.floor(Number(process.env.MAX_USERS) || 0));
 
 /* ---------- accounts ---------- */
 // The same shape everywhere (sign-up, sign-in, /me): never the password hash, never other people's data.
-const publicUser = (u) => u && { id: u.id, email: u.email, displayName: u.display_name || null, isAdmin: isAdmin(u), termsAccepted: u.terms_version === LEGAL_VERSION, ...(isAdmin(u) ? { feedbackNew: db.countNewFeedback() } : {}) };
+const AI_LANGS = ["简体中文", "繁體中文", "English"];
+const DEFAULT_LANG = "简体中文";
+const langOf = (u) => (AI_LANGS.includes(u?.pref_lang) ? u.pref_lang : DEFAULT_LANG);
+const publicUser = (u) => u && { id: u.id, email: u.email, displayName: u.display_name || null, prefLang: langOf(u), isAdmin: isAdmin(u), termsAccepted: u.terms_version === LEGAL_VERSION, ...(isAdmin(u) ? { feedbackNew: db.countNewFeedback() } : {}) };
 const authLimit = auth.rateLimit({ windowMs: 10 * 60_000, max: 15, message: "Too many attempts. Try again in a few minutes." });
 const identifyLimit = auth.rateLimit({ windowMs: 10 * 60_000, max: 40, by: "user", message: "Too many searches. Try again in a few minutes." });
 const viewsLimit = auth.rateLimit({ windowMs: 10 * 60_000, max: 150, by: "user" });
@@ -253,6 +256,7 @@ STYLE
 - Plain, warm, easy-to-read language. Emotion in a few well-chosen words beats long description. First-person feelings are welcome ("读到这句，我…").
 - Stay close to the lyrics: tie every point to a specific line or image in THESE lyrics. Never write generic filler like "this song is about love and loss".
 - Write everything, including headings, in the requested language. In Chinese, use natural, gentle, literary Chinese, not translation-ese. Keep song/artist names as written.
+- The requested language applies ONLY to your own explanation. Lyric lines are never translated, paraphrased into that language or converted (for example Traditional ↔ Simplified Chinese): quote them exactly as they appear in <lyrics>, in their original language and script.
 
 STRUCTURE (headings translated into the requested language; keep this order; keep each part brief)
 ## The feeling in one line — one sentence for the emotional core.
@@ -339,14 +343,16 @@ app.get("/api/songs/:id/lyrics", (req, res) => res.json({ lyrics: db.getSongLyri
 app.post("/api/songs/:id/lyrics/find", viewsLimit, async (req, res) => {
   const song = db.getSong(req.user.id, idOf(req));
   if (!song) return bad(res, "Song not found", 404);
-  let lyrics = db.getSongLyrics(req.user.id, song.id);
+  // refresh: look them up online again and replace what is saved (the "Sync lyrics" button). If nothing is found, what is saved stays.
+  const refresh = req.body?.refresh === true;
+  let lyrics = refresh ? null : db.getSongLyrics(req.user.id, song.id), source = null;
   if (!lyrics) {
-    const found = await fetchLyrics(song.artist, song.title);
+    const found = await fetchLyrics(song.artist, song.title, { fresh: refresh });
     if (!found) return bad(res, "Couldn't find the lyrics online. Paste them under “Lyrics”, or write your own words.", 422);
-    lyrics = found.text;
+    lyrics = found.text; source = found.source;
     db.setLyrics(req.user.id, song.id, lyrics, true);
   }
-  res.json({ lyrics });
+  res.json({ lyrics, source });
 });
 
 app.delete("/api/songs/:id",(req, res) => (db.deleteSong(req.user.id, idOf(req)), res.json({ ok: true })));
@@ -361,7 +367,7 @@ app.post("/api/songs/:id/explain", aiLimit, async (req, res) => {
   } catch (e) {
     return bad(res, e.message, e.status || 400);
   }
-  const language = ["English", "简体中文", "繁體中文"].includes(req.body?.language) ? req.body.language : "English";
+  const language = AI_LANGS.includes(req.body?.language) ? req.body.language : langOf(req.user);
 
   // If the user presses Stop (connection closes early), stop generating and don't save a partial result.
   let aborted = false;
@@ -435,6 +441,7 @@ app.get("/api/songs/:id/views", viewsLimit, async (req, res) => {
   const song = db.getSong(req.user.id, idOf(req));
   if (!song) return bad(res, "Song not found", 404);
   try {
+    if (req.query.source === "reddit") return res.json(await redditPage(song.artist, song.title));
     if (req.query.source === "youtube") {
       const key = youtubeKey(req);
       if (!key) return bad(res, "Add your YouTube Data API key in AI settings first.", 400);
@@ -465,7 +472,7 @@ app.post("/api/songs/:id/views/summary", aiLimit, async (req, res) => {
   } catch (e) {
     return bad(res, e.message, e.status || 400);
   }
-  const language = ["English", "简体中文", "繁體中文"].includes(req.body?.language) ? req.body.language : "English";
+  const language = AI_LANGS.includes(req.body?.language) ? req.body.language : langOf(req.user);
   let aborted = false;
   res.on("close", () => { if (!res.writableEnded) aborted = true; });
 
@@ -509,6 +516,12 @@ function cleanName(raw) {
   return { name: n };
 }
 const profileLimit = auth.rateLimit({ windowMs: 60 * 60_000, max: 20, by: "user", message: "Too many name changes. Try again later." });
+// Which language AI explanations (and listener summaries) are written in. The lyrics themselves are never translated.
+app.put("/api/auth/preferences", (req, res) => {
+  if (!AI_LANGS.includes(req.body?.language)) return bad(res, "Unknown language.");
+  db.setPrefLang(req.user.id, req.body.language);
+  res.json({ prefLang: req.body.language });
+});
 app.put("/api/auth/profile", profileLimit, (req, res) => {
   const c = cleanName(req.body?.displayName);
   if (c.error) return bad(res, c.error);

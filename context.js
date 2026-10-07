@@ -101,6 +101,50 @@ export async function youtubePage(artist, title, apiKey, pageToken = "") {
   };
 }
 
+// Reddit discussions about the song, through Reddit's public RSS feeds (no account or key). Best effort: Reddit may refuse
+// requests from some servers, in which case this simply finds nothing. Only the text of posts and comments is kept —
+// never user names. The page links to the threads so people can read (and join) them on Reddit itself.
+const REDDIT_UA = "Mozilla/5.0 (compatible; SongExplain/1.0; personal use)";
+const decodeHtml = (s) =>
+  String(s)
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&amp;/g, "&");
+const htmlToText = (s) => decodeHtml(decodeHtml(s).replace(/<(br|\/p|\/li)\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+let redditBusyUntil = 0;
+async function redditFeed(url) {
+  if (Date.now() < redditBusyUntil) return [];
+  try {
+    const r = await fetch(url, { headers: { "User-Agent": REDDIT_UA, Accept: "application/atom+xml,application/xml,text/xml" }, signal: AbortSignal.timeout(9000) });
+    if (r.status === 429) { redditBusyUntil = Date.now() + 5 * 60_000; return []; } // Reddit asks us to slow down: stop asking for 5 minutes
+    if (!r.ok) return [];
+    const xml = await r.text();
+    return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].map((m) => ({
+      title: htmlToText((m[1].match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || ""),
+      url: (m[1].match(/<link[^>]*href="([^"]+)"/) || [])[1] || "",
+      text: htmlToText((m[1].match(/<content[^>]*>([\s\S]*?)<\/content>/) || [])[1] || ""),
+    }));
+  } catch { return []; }
+}
+const redditCache = new Map();
+export async function redditPage(artist, title) {
+  const t = stripNoise(title), a = stripNoise(artist);
+  const key = `${a}|${t}`.toLowerCase();
+  const hit = redditCache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.value;
+  if (Date.now() < redditBusyUntil) return { items: [], threads: [], busy: true };
+  const found = await redditFeed(`https://www.reddit.com/search.rss?q=${enc(`"${t}" ${a}`)}&sort=relevance&t=all&limit=15`);
+  // a thread counts only if it really mentions both the song and the artist
+  const threads = found.filter((f) => /\/comments\//.test(f.url) && looseEq(`${f.title} ${f.text}`, t) && looseEq(`${f.title} ${f.text}`, a)).slice(0, 4);
+  const items = [], seen = new Set();
+  const add = (text) => { if (okComment({ text }) && !seen.has(text)) { seen.add(text); items.push({ text, likes: null }); } };
+  for (const th of threads) { add(th.text); }
+  const bodies = await Promise.all(threads.slice(0, 3).map((th) => redditFeed(th.url.replace(/\/?$/, "/") + ".rss?limit=40&sort=top")));
+  bodies.forEach((entries) => entries.slice(1).forEach((e) => add(e.text))); // the first entry is the post itself
+  const busy = Date.now() < redditBusyUntil; // a request was refused part-way: don't remember an empty answer
+  const value = { items: items.slice(0, 60), threads: threads.map((th) => ({ title: th.title.slice(0, 120), url: th.url })), busy };
+  if (!busy) redditCache.set(key, { value, exp: Date.now() + (items.length ? 3600_000 : 600_000) });
+  return value;
+}
+
 // Returns { views: [{text, likes}], comments: [text] (top 12, for the AI), wiki }.
 export async function gatherContext(artist, title) {
   const key = `${artist}|${title}`.toLowerCase();

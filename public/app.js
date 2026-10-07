@@ -7,8 +7,8 @@ let me = null;          // signed-in user { id, email } or null
 let regFull = false;    // the beta has reached MAX_USERS
 let regMode = "open";   // open | invite | closed
 // Only harmless preferences live in the browser (theme, language, which model you picked).
-// API keys are NEVER stored here — they are saved encrypted on the server (see AI settings).
-const PER_USER = /^activeModel$/;
+// API keys are not kept here in plain text: they are saved encrypted on the server, or — only if you choose "This device" — encrypted in this browser's IndexedDB (see AI settings).
+const PER_USER = /^(activeModel|keyMode)$/;
 const nk = (k) => (PER_USER.test(k) && me ? `u${me.id}:${k}` : k);
 const store = {
   get(k) { try { return localStorage.getItem(nk(k)); } catch { return null; } },
@@ -57,6 +57,52 @@ let SESS = [];            // "don't save" connections — memory only: { sid, pr
 let sessActive = null;    // sid of the session connection picked in the model switcher
 let sessSeq = 0;
 let SESS_YT = "";         // "don't save" YouTube key — memory only
+/* ---------- "This device": keys kept in THIS browser, encrypted ---------- */
+// A third way to keep a key (besides "this visit only" and "saved on the server"): it never leaves the browser except as
+// the per-request header, and it is not stored in plain text. It is encrypted with AES-GCM using a key that the browser
+// keeps in IndexedDB and will not let scripts read out (non-extractable). This hides it from someone looking through
+// the browser's stored data, but NOT from a script running on this page — which is why the page is locked down by a strict CSP.
+const keyMode = () => store.get("keyMode") || (store.get("rememberKeys") === "1" ? "server" : "visit"); // visit | server | device
+const vaultIO = (mode, fn) =>
+  new Promise((resolve, reject) => {
+    const open = indexedDB.open("songexplain-vault", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("kv");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const t = open.result.transaction("kv", mode);
+      const rq = fn(t.objectStore("kv"));
+      t.oncomplete = () => { open.result.close(); resolve(rq?.result); };
+      t.onerror = t.onabort = () => reject(t.error);
+    };
+  });
+const vaultKey = async () => {
+  let k = await vaultIO("readonly", (s) => s.get("aes"));
+  if (!k) { k = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]); await vaultIO("readwrite", (s) => s.put(k, "aes")); }
+  return k;
+};
+let vaultReady = false; // true once the saved keys have been read back, so an early save can't wipe them
+async function vaultSave() {
+  if (!me || !vaultReady) return;
+  try {
+    if (keyMode() !== "device") return vaultIO("readwrite", (s) => s.delete("u" + me.id));
+    const data = SESS.filter((s) => s.status === "ok").map(({ sid, provider, short, model, baseUrl, key, hint, status }) => ({ sid, provider, short, model, baseUrl, key, hint, status }));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await vaultKey(), new TextEncoder().encode(JSON.stringify(data)));
+    await vaultIO("readwrite", (s) => s.put({ iv, ct }, "u" + me.id));
+  } catch {}
+}
+async function vaultLoad() {
+  vaultReady = true;
+  if (!me || keyMode() !== "device") return;
+  try {
+    const rec = await vaultIO("readonly", (s) => s.get("u" + me.id));
+    if (!rec) return;
+    const data = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: rec.iv }, await vaultKey(), rec.ct)));
+    if (Array.isArray(data)) { SESS = data; sessSeq = Math.max(0, ...data.map((s) => s.sid)); }
+  } catch {}
+}
+const vaultForget = (userId) => { try { vaultIO("readwrite", (s) => s.delete("u" + userId)).catch(() => {}); } catch {} }; // sign out / delete account
+
 const wipeSession = () => { SESS = []; sessActive = null; SESS_YT = ""; };
 
 const hintOf = (k) => (k.length >= 12 ? `••••${k.slice(-4)}` : "••••");
@@ -123,7 +169,7 @@ let aiOther = false;       // "Other…" was chosen, so show the full provider l
 let aiModelOpen = false;   // the model name field is open
 
 async function openSettings() {
-  $("airemember").checked = store.get("rememberKeys") === "1";
+  $("airemember").checked = keyMode() === "server";
   aiAdding = false; aiOther = false; aiModelOpen = false;
   $("settings").showModal();
   await loadAI();
@@ -145,10 +191,13 @@ function syncProviderFields() {
   $("aikeylink").hidden = !link; if (link) $("aikeylink").href = link;
   $("aikey").placeholder = k && remember ? "Leave empty to use your saved key" : "Paste your API key";
   $("aikeyhint").textContent = k && remember ? `A ${p?.short || ""} key is already saved (${k.hint}).` : "";
-  document.querySelectorAll("#remseg button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "1") === remember)));
-  $("remnote").textContent = remember
+  const mode = keyMode();
+  document.querySelectorAll("#remseg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (mode === "server" ? "1" : mode === "device" ? "d" : "0"))));
+  $("remnote").textContent = mode === "server"
     ? "Saved on the server, encrypted. You will only ever see its last 4 characters."
-    : "Not saved anywhere — it disappears when you close or refresh this tab.";
+    : mode === "device"
+      ? "Kept encrypted in this browser only — the server never stores it. Anyone who can open this browser on this computer could use it, so don't choose this on a shared computer."
+      : "Not saved anywhere — it disappears when you close or refresh this tab.";
   // the model: shown as a one-line summary; open the field only when needed (no default, or you ask to change it)
   const needsModel = !p?.model;
   const model = $("aimodelin").value.trim() || p?.model || "";
@@ -180,11 +229,15 @@ function renderAISettings() {
     return `<div class="aiprov"><div class="row"><b>${esc(p?.short || pid)}</b><span class="note" style="margin:0">saved · ${esc(k?.hint || "")}</span><button class="link danger push" data-act="rmkey" data-p="${esc(pid)}">Remove key</button></div>
       ${(byProv[pid] || []).map((m) => row(m.status, m.model, statusText[m.status] || "", `<button class="link" data-act="retest" data-id="${m.id}">Test</button><button class="link danger" data-act="rmmodel" data-id="${m.id}">Remove</button>`, m.status === "failed" ? m.error : "")).join("")}${amUI("p:" + pid)}</div>`;
   }).join("");
-  const sess = SESS.length
-    ? `<div class="aiprov"><div class="row"><b>This visit only</b><span class="note" style="margin:0">not saved</span></div>
-        ${SESS.map((s) => row(s.status, `${s.short} · ${s.model}`, s.status === "ok" ? "connected" : "failed", `<button class="link" data-act="stest" data-sid="${s.sid}">Test</button><button class="link danger" data-act="srm" data-sid="${s.sid}">Remove</button>`, s.status === "failed" ? s.error : "")).join("")}${[...new Map(SESS.map((x) => [x.provider + "|" + x.key, x])).values()].map((x) => amUI("s:" + x.sid)).join("")}</div>`
-    : "";
+  // keys that aren't on the server: one block per key, named after its provider
+  const where = keyMode() === "device" ? "saved in this browser" : "this visit only";
+  const sess = [...new Map(SESS.map((x) => [x.provider + " " + x.key, x])).values()].map((g) => {
+    const items = SESS.filter((x) => x.provider === g.provider && x.key === g.key);
+    return `<div class="aiprov"><div class="row"><b>${esc(g.short)}</b><span class="note" style="margin:0">${where} · ${esc(g.hint)}</span><button class="link danger push" data-act="srmkey" data-sid="${g.sid}">Remove key</button></div>
+      ${items.map((s) => row(s.status, s.model, s.status === "ok" ? "connected" : "failed", `<button class="link" data-act="stest" data-sid="${s.sid}">Test</button><button class="link danger" data-act="srm" data-sid="${s.sid}">Remove</button>`, s.status === "failed" ? s.error : "")).join("")}${amUI("s:" + g.sid)}</div>`;
+  }).join("");
   $("aimodels").innerHTML = saved + sess;
+  vaultSave();
 
   if (AI.youtube) {
     $("ytbox").innerHTML = `<div class="row"><span class="note" style="margin:0">YouTube key saved ${esc(AI.youtube.hint)}</span><button class="link danger" data-act="ytremove">Remove</button></div>`;
@@ -219,16 +272,18 @@ function amListHTML() {
   return shown.map((m) => `<label class="check amrow"><input type="checkbox" data-am="${esc(m)}"${AMP.picked.has(m) ? " checked" : ""}><span>${esc(m)}</span></label>`).join("");
 }
 function amPanelHTML() {
-  if (AMP.loading) return `<div class="addpanel"><p class="note" style="margin:0">Looking up the models on your account…</p></div>`;
+  if (AMP.loading) return `<div class="addpanel"><p class="note" style="margin:0">Looking up the models on your ${esc(amName(AMP.id))} account…</p></div>`;
   return `<div class="addpanel">
-    <p class="note" style="margin:0 0 8px">Tick the models you want to use with this key. Each one is tested before it is added.</p>
+    <p class="amhead">Add models to <b>${esc(amName(AMP.id))}</b></p>
+    <p class="note" style="margin:0 0 8px">Tick the models you want to use with this ${esc(amName(AMP.id))} key. Each one is tested before it is added.</p>
     ${AMP.models.length > 8 ? `<input id="amfilter" type="text" placeholder="Filter models" autocomplete="off" value="${esc(AMP.filter)}">` : ""}
     <div class="amlist" id="amlist">${amListHTML()}</div>
     <div class="field"><input id="amcustom" type="text" placeholder="Or type a model name" autocomplete="off" spellcheck="false" value="${esc(AMP.custom)}"></div>
     <div class="row" style="margin-top:12px"><button class="btn sm" data-act="amgo" type="button"${AMP.busy ? " disabled" : ""}>${AMP.busy ? "Testing…" : "Test &amp; add"}</button><button class="link" data-act="amcancel" type="button">Cancel</button><span class="note ${AMP.err ? "err" : ""}" id="amstat" style="margin:0">${esc(AMP.status || "")}</span></div>
   </div>`;
 }
-const amUI = (id) => (AMP?.id === id ? amPanelHTML() : `<div class="row" style="margin-top:6px"><button class="link" data-act="amopen" data-id="${esc(id)}" type="button">+ Add models</button></div>`);
+const amName = (id) => { const t = amTarget(id); return t ? (t.c?.short || providers.find((p) => p.id === t.provider)?.short || t.provider) : ""; };
+const amUI = (id) => (AMP?.id === id ? amPanelHTML() : `<div class="row" style="margin-top:6px"><button class="link" data-act="amopen" data-id="${esc(id)}" type="button">+ Add ${esc(amName(id))} models</button></div>`);
 
 async function amOpen(id) {
   const t = amTarget(id);
@@ -383,6 +438,7 @@ async function migrateLegacyKeys() {
 async function initAI() {
   try { providers = await (await fetch("/api/providers")).json(); } catch { providers = []; }
   await migrateLegacyKeys();
+  await vaultLoad();
   await loadAI();
 }
 
@@ -444,7 +500,7 @@ document.addEventListener("click", async (e) => {
       $("aimodelin").value = ""; $("aipickwrap").hidden = true; $("aimodelinwrap").hidden = false; $("airesult").textContent = "";
       syncProviderFields(); $("aikey").focus();
     } else if (act === "remember") {
-      $("airemember").checked = el.dataset.v === "1"; store.set("rememberKeys", el.dataset.v === "1" ? "1" : "");
+      { const v = el.dataset.v, mode = v === "1" ? "server" : v === "d" ? "device" : "visit"; $("airemember").checked = mode === "server"; store.set("keyMode", mode); vaultSave(); }
       syncProviderFields();
     } else if (act === "aiadd") { aiAdding = true; renderAISettings(); $("aikey").focus(); }
     else if (act === "amopen") amOpen(el.dataset.id);
@@ -504,6 +560,12 @@ document.addEventListener("click", async (e) => {
       if (!r.ok && sessActive === c.sid) sessActive = null;
       renderAISettings(); refreshAIChrome(); renderModelPicker();
       if (r.ok) toast("Connected"); else toast(r.error || "Connection failed", "err");
+    } else if (act === "srmkey") {
+      const g = SESS.find((x) => x.sid === Number(el.dataset.sid));
+      if (!g) return;
+      if (sessActive && SESS.some((x) => x.sid === sessActive && x.provider === g.provider && x.key === g.key)) sessActive = null;
+      SESS = SESS.filter((x) => !(x.provider === g.provider && x.key === g.key));
+      AMP = null; renderAISettings(); refreshAIChrome(); renderModelPicker();
     } else if (act === "srm") {
       const sid = Number(el.dataset.sid);
       SESS = SESS.filter((x) => x.sid !== sid);
@@ -1739,7 +1801,7 @@ $("acctnamesave").onclick = async () => {
 };
 $("logoutbtn").onclick = async () => {
   await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-  $("acctdlg").close(); wipeSession(); me = null; curSong = null; updateChrome(); location.hash = "#/"; renderAuth("login");
+  $("acctdlg").close(); vaultForget(me.id); wipeSession(); me = null; curSong = null; updateChrome(); location.hash = "#/"; renderAuth("login");
 };
 $("exportbtn").onclick = async () => {
   try {
@@ -1756,7 +1818,7 @@ $("delacct").onclick = async () => {
     const r = await fetch("/api/auth/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: $("delpw").value }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "Could not delete the account.");
-    $("acctdlg").close(); wipeSession(); me = null; curSong = null; updateChrome(); location.hash = "#/"; renderAuth("login"); toast("Account deleted");
+    $("acctdlg").close(); vaultForget(me.id); wipeSession(); me = null; curSong = null; updateChrome(); location.hash = "#/"; renderAuth("login"); toast("Account deleted");
   } catch (e) { toast(e.message, "err"); }
 };
 

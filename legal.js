@@ -3,7 +3,7 @@
 // DRAFT: written for a small invite-only beta run from Malaysia. It is not legal advice. Have a lawyer review it
 // before opening the service to the public. Set OPERATOR_NAME and CONTACT_EMAIL in the environment.
 // Bump LEGAL_VERSION whenever the text changes in a way users must accept again.
-export const LEGAL_VERSION = "2026-10-06-r4"; // YYYY-MM-DD-revision: shown date is the first 10 characters
+export const LEGAL_VERSION = "2026-10-07-r5"; // YYYY-MM-DD-revision: shown date is the first 10 characters
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const operator = () => esc(process.env.OPERATOR_NAME || "the person who runs this app");
@@ -138,7 +138,7 @@ const PRIVACY = {
 <p>Hosting and AI providers may process data outside Malaysia. By using the Service, and the AI features in particular, you consent to this.</p>
 
 <h2>5. Cookies and local storage</h2>
-<p>One essential cookie keeps you signed in. Your browser also stores preferences (theme, language, selected model). There are no tracking or advertising cookies.</p>
+<p>One essential cookie keeps you signed in. Your browser also stores preferences (theme, language, selected model) and, only if you choose “This device” in AI settings, your AI API key (encrypted, never sent to us except with your own requests). There are no tracking or advertising cookies.</p>
 
 <h2>6. Security</h2>
 <p>Passwords are stored as salted hashes; saved API keys are encrypted; connections use HTTPS; access is restricted. No system is perfectly secure. If a breach is likely to cause significant harm, we will notify affected users and the Personal Data Protection Commissioner as the law requires.</p>
@@ -189,7 +189,7 @@ const PRIVACY = {
 <p>Pengehosan dan penyedia AI mungkin memproses data di luar Malaysia. Dengan menggunakan Perkhidmatan ini, terutamanya ciri AI, anda bersetuju dengan perkara ini.</p>
 
 <h2>5. Kuki dan storan tempatan</h2>
-<p>Satu kuki penting mengekalkan log masuk anda. Pelayar anda juga menyimpan pilihan (tema, bahasa, model yang dipilih). Tiada kuki penjejakan atau pengiklanan.</p>
+<p>Satu kuki penting mengekalkan log masuk anda. Pelayar anda juga menyimpan pilihan (tema, bahasa, model yang dipilih) dan, hanya jika anda memilih “This device” dalam tetapan AI, kunci API AI anda (disulitkan, hanya dihantar bersama permintaan anda sendiri). Tiada kuki penjejakan atau pengiklanan.</p>
 
 <h2>6. Keselamatan</h2>
 <p>Kata laluan disimpan sebagai hash bergaram; kunci API yang disimpan disulitkan; sambungan menggunakan HTTPS; akses dihadkan. Tiada sistem yang selamat sepenuhnya. Jika pelanggaran data berkemungkinan menyebabkan kemudaratan ketara, kami akan memberitahu pengguna yang terjejas dan Pesuruhjaya Perlindungan Data Peribadi seperti yang dikehendaki undang-undang.</p>
@@ -240,7 +240,7 @@ const PRIVACY = {
 <p>托管服务和 AI 服务商可能在马来西亚境外处理资料。使用本服务，特别是 AI 功能，即表示你同意这一点。</p>
 
 <h2>5. Cookie 与本地存储</h2>
-<p>一个必要的 cookie 用于保持登录。你的浏览器还会保存偏好设置（主题、语言、所选模型）。没有追踪或广告 cookie。</p>
+<p>一个必要的 cookie 用于保持登录。你的浏览器还会保存偏好设置（主题、语言、所选模型），以及——仅当你在 AI 设置里选择“This device”时——你的 AI API key（已加密，只会随你自己的请求发送）。没有追踪或广告 cookie。</p>
 
 <h2>6. 安全</h2>
 <p>密码以加盐哈希保存；保存的 API key 已加密；连接使用 HTTPS；访问受到限制。没有任何系统是绝对安全的。如果资料泄露可能造成重大损害，我们会依法通知受影响的用户和个人资料保护专员。</p>

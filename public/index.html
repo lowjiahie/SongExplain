@@ -167,6 +167,7 @@
   .backlink { display:block; margin:-6px 0 12px }
   .addpanel { margin:10px 0 4px 21px; padding:14px 16px; border:1px solid var(--hair) } .amlist { max-height:210px; overflow:auto; margin:8px 0; border-top:1px solid var(--hair) }
   .amrow { margin:0 !important; padding:7px 0; border-bottom:1px solid var(--hair); align-items:center } .amrow span { overflow-wrap:anywhere; color:var(--ink); font-size:.78rem }
+  .amhead { margin:0 0 6px; font-size:.95rem } .amhead b { font-family:var(--display) }
   .libfilter { display:flex; gap:14px; align-items:center; max-width:420px; margin:0 0 30px } .libfilter input { flex:1; min-width:0 }
   .mood:hover { color:var(--ink) } .mood[aria-pressed=true] { color:var(--ink); border-bottom-color:var(--rule) }
   .entry { margin-top:30px; padding:22px 0 0; border-top:1px solid var(--hair) }
@@ -323,7 +324,8 @@
       <b>Keep it for next time?</b>
       <div class="seg wrapseg" id="remseg" style="margin-top:8px">
         <button type="button" data-act="remember" data-v="0" aria-pressed="true">Just this visit</button>
-        <button type="button" data-act="remember" data-v="1" aria-pressed="false">Save (encrypted)</button>
+        <button type="button" data-act="remember" data-v="d" aria-pressed="false">This device</button>
+        <button type="button" data-act="remember" data-v="1" aria-pressed="false">Server (encrypted)</button>
       </div>
       <p class="note" id="remnote" style="margin:8px 0 0"></p>
       <input type="checkbox" id="airemember" hidden>

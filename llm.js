@@ -124,7 +124,11 @@ export async function* streamChat(cfg, { system, user, maxTokens, info = {} }) {
   const dec = new TextDecoder();
   let buf = "";
   let finished = false; // saw [DONE] or a finish_reason
-  for await (const chunk of res.body) {
+  let gotText = false;
+  // Some providers (Gemini among them) end the stream without a newline after the last "data:" line. Without a final
+  // newline that last line — often the one with the finish marker, sometimes the last words — would never be read.
+  async function* chunksThenNewline(body) { for await (const c of body) yield c; yield new TextEncoder().encode("\n"); }
+  for await (const chunk of chunksThenNewline(res.body)) {
     buf += dec.decode(chunk, { stream: true });
     let nl;
     while ((nl = buf.indexOf("\n")) >= 0) {
@@ -141,15 +145,16 @@ export async function* streamChat(cfg, { system, user, maxTokens, info = {} }) {
       }
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error).slice(0, 200));
       const choice = j.choices?.[0];
-      if (choice?.delta?.content) yield choice.delta.content;
+      if (choice?.delta?.content) { gotText = true; yield choice.delta.content; }
       if (choice?.finish_reason) {
         finished = true;
         if (choice.finish_reason === "length") info.truncated = true;
       }
     }
   }
-  // The connection ended without a clean finish: don't silently present half an answer as complete.
-  if (!finished) throw new Error("The AI connection was cut off before the answer finished.");
+  // The stream closed properly but never said "finished" (some providers just stop): if words arrived, that is the answer.
+  // A connection that really broke does not end quietly — it throws while reading, handled by the caller.
+  if (!finished && !gotText) throw new Error("The AI sent back an empty answer.");
 }
 
 export async function chat(cfg, opts) {
@@ -163,6 +168,8 @@ export function friendlyError(e, cfg) {
   if (e?.status === 401 || e?.status === 403) return `Your ${label} API key was rejected. Check it in AI settings.`;
   if (e?.status === 429) return `Rate limit or no credit on your ${label} account.`;
   if (TRANSIENT.has(e?.status)) return `${label} is overloaded right now. This is temporary and not a problem with your key — try again in a minute.`;
+  if (/terminated|ECONNRESET|socket|aborted|cut off|other side closed/i.test(String(e?.message) + " " + String(e?.cause?.code || e?.cause?.message || "")))
+    return "The connection to the AI was interrupted. Press Explain to try again.";
   return redact(e?.message || "Unknown error", cfg?.apiKey);
 }
 

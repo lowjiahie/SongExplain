@@ -164,12 +164,22 @@ const KEY_LINKS = {
   groq: "https://console.groq.com/keys",
   openrouter: "https://openrouter.ai/keys",
 };
+// Plain-language steps for getting a key, shown under "New to this?" in the AI settings.
+const KEY_GUIDE = {
+  gemini: ["Press “Get a key ↗” and sign in with a Google account.", "Press “Create API key”, then copy it.", "Paste it below."],
+  openai: ["Press “Get a key ↗” and sign in.", "Add a little credit under Billing, create a secret key and copy it.", "Paste it below."],
+  anthropic: ["Press “Get a key ↗” and sign in.", "Add a little credit under Billing, create a key and copy it.", "Paste it below."],
+  deepseek: ["Press “Get a key ↗” and sign in.", "Top up a small balance, create a key and copy it.", "Paste it below."],
+};
+const KEY_GUIDE_OTHER = ["Create an API key on your provider's website.", "Type their OpenAI-compatible Base URL above.", "Paste the key below."];
 const POPULAR = ["anthropic", "openai", "gemini", "deepseek"];
 let aiAdding = false;      // the add form is open although something is already connected
 let aiOther = false;       // "Other…" was chosen, so show the full provider list
 let aiModelOpen = false;   // the model name field is open
 
-async function openSettings() {
+let aiFirst = false;
+async function openSettings(first) {
+  aiFirst = !!first;
   $("airemember").checked = keyMode() === "server";
   aiAdding = false; aiOther = false; aiModelOpen = false;
   $("settings").showModal();
@@ -188,6 +198,7 @@ function syncProviderFields() {
   $("aiprovwrap").hidden = !(aiOther || !POPULAR.includes(pid));
   $("aibasewrap").hidden = !p?.custom;
   if (p?.custom && k?.baseUrl && !$("aibase").value) $("aibase").value = k.baseUrl;
+  $("aiguidesteps").innerHTML = (KEY_GUIDE[pid] || KEY_GUIDE_OTHER).map((t) => `<li>${esc(t)}</li>`).join("");
   const link = KEY_LINKS[pid];
   $("aikeylink").hidden = !link; if (link) $("aikeylink").href = link;
   $("aikey").placeholder = k && remember ? "Leave empty to use your saved key" : "Paste your API key";
@@ -210,7 +221,7 @@ function renderAISettings() {
   $("aiform").hidden = !showForm;
   $("aiaddbtn").hidden = showForm;
   $("aititle").textContent = hasAny ? "Your AI" : "Connect an AI";
-  $("aisub").textContent = hasAny ? "Choose which one to use from the Model menu next to “Explain this song”." : "Pick a provider, paste your key, and you're done.";
+  $("aisub").textContent = hasAny ? "Choose which one to use from the Model menu next to “Explain this song”." : aiFirst ? "One quick step before your first Explain: pick a provider and paste your key. You only do this once." : "Pick a provider, paste your key, and you're done.";
   $("ailocal").hidden = !(AI.serverKey && !hasAny);
   if (showForm) syncProviderFields();
 
@@ -439,12 +450,48 @@ async function initAI() {
 }
 
 /* ---------- API helper ---------- */
+/* ---------- waiting for the server: block clicks at once, show the pixel loader if it takes a moment ---------- */
+// While anything that saves or changes data is in flight the whole screen is covered, so a second click can't reach a button.
+// The cover is invisible for the first 0.28 s (quick answers never flash), then the pixel loader fades in.
+let busyN = 0, busyShowT = 0;
+function busy(label = "Working") {
+  const box = $("busy");
+  if (!box) return () => {};
+  busyN++;
+  $("busytext").textContent = label;
+  document.activeElement?.blur?.(); // an Enter key press must not trigger the same button again
+  try { box.showPopover(); } catch {}
+  clearTimeout(busyShowT); busyShowT = setTimeout(() => box.classList.add("show"), 280);
+  let done = false;
+  const end = () => {
+    if (done) return;
+    done = true; clearTimeout(kill);
+    if (--busyN <= 0) { busyN = 0; clearTimeout(busyShowT); box.classList.remove("show"); try { box.hidePopover(); } catch {} }
+  };
+  const kill = setTimeout(end, 45000); // never leave the screen covered for good
+  return end;
+}
+const NO_SHIELD = /\/explain$|\/views\/summary$|^\/api\/ai\/|\/api\/identify$|\/api\/auth\/me$|\/api\/cover/; // these show their own progress
+function busyLabel(method, url) {
+  if (method === "DELETE") return "Deleting";
+  if (/\/lyrics\/find$/.test(url)) return "Looking for lyrics";
+  if (/\/lyrics$/.test(url)) return "Saving lyrics";
+  if (/\/perspectives/.test(url)) return method === "POST" ? "Saving your feeling" : "Updating your feeling";
+  if (/\/api\/songs\/check$/.test(url)) return "Checking your library";
+  if (/\/api\/songs$/.test(url)) return "Saving the song";
+  if (/\/report$/.test(url)) return "Sending report";
+  if (/feedback/.test(url)) return "Sending";
+  return "Saving";
+}
 async function api(method, url, body, signal) {
-  const r = await rawApi(method, url, body, signal);
-  if (r.status === 401) {
-    try { if ((await r.clone().json()).code === "AUTH") sessionExpired(); } catch {}
-  }
-  return r;
+  const end = method !== "GET" && !NO_SHIELD.test(url) ? busy(busyLabel(method, url)) : null;
+  try {
+    const r = await rawApi(method, url, body, signal);
+    if (r.status === 401) {
+      try { if ((await r.clone().json()).code === "AUTH") sessionExpired(); } catch {}
+    }
+    return r;
+  } finally { end?.(); }
 }
 function rawApi(method, url, body, signal) {
   const m = activeModel();
@@ -477,6 +524,7 @@ document.addEventListener("click", async (e) => {
     else if (act === "pastelyrics") showTab("lyrics");
     else if (act === "addprefill") openAdd(CAND.q);
     else if (act === "candpage") { CAND.page = Number(el.dataset.p); renderCandidates(); $("status").scrollIntoView({ behavior: "smooth", block: "start" }); }
+    else if (act === "guide") startTour();
     else if (act === "feedback") openFeedback();
     else if (act === "fbkind") setFbKind(el.dataset.v);
     else if (act === "fbadmin") { $("acctdlg").close(); openFeedbackAdmin(); }
@@ -686,6 +734,7 @@ function setLyricsText(song, text) {
 }
 
 /* ---------- Home: search results + library ---------- */
+const TRY_SONGS = ["晴天 周杰伦", "七里香 周杰伦", "Yesterday Beatles", "光年之外 G.E.M."];
 async function renderHome() {
   $("navlib").classList.add("on");
   $("view").innerHTML = `
@@ -698,19 +747,21 @@ async function renderHome() {
         <input id="q" type="text" placeholder="Search a song, or paste a YouTube link" autocomplete="off" aria-label="Search a song or paste a YouTube link">
         <button class="btn" type="submit" id="find">Find</button>
       </form>
-      <p class="hint">Try: a song title and artist — or a youtube.com link.</p>
+      <div class="tryrow"><span>Try</span>${TRY_SONGS.map((t) => `<button type="button" data-try="${esc(t)}">${esc(t)}</button>`).join("")}<span>· or paste a YouTube link</span></div>
+      <p class="hint">Can't find your song? <button class="link" data-act="add" type="button">Add it by hand</button></p>
     </section>
-    <div class="libhead"><span class="lab">Library <span id="libcount"></span></span><button class="btn ghost" data-act="add">+ Add a song</button></div>
+    <div class="libhead"><span class="lab">Library <span id="libcount"></span></span></div>
     <div class="libfilter" id="libfilter" hidden><input id="libq" type="text" placeholder="Filter your library by title or artist" autocomplete="off" aria-label="Filter your library"><button class="link" id="libclear" hidden>clear</button></div>
     <div id="lib" class="masonry"></div>
   </div>`;
   bindSearchForm();
   $("q").focus();
+  $("view").querySelector(".tryrow").onclick = (e) => { const b = e.target.closest("[data-try]"); if (b) goSearch(b.dataset.try); };
   try {
     const songs = await json("GET", "/api/songs");
     if (!$("lib")) return;
     $("libcount").textContent = songs.length ? `(${songs.length})` : "";
-    if (!songs.length) { $("lib").className = ""; $("lib").innerHTML = `<div class="empty"><p>Nothing here yet.</p><p class="mono">Search for a song above. Every song you open is kept in this library.</p></div>`; return; }
+    if (!songs.length) { $("lib").className = ""; $("lib").innerHTML = `<div class="empty"><p>Your library is empty — here is how it works.</p><ol class="steps"><li><b>1 · Search</b>Type a song and artist above, or tap one of the examples.</li><li><b>2 · Explain</b>Open the song and press “Explain this song”.</li><li><b>3 · Feel</b>Write how it makes you feel, in your own words.</li></ol></div>`; return; }
     // Filtering the library is separate from searching for new songs: it only looks at songs you already have.
     const draw = (list) => {
       $("lib").innerHTML = "";
@@ -1336,7 +1387,7 @@ async function renderSong(id) {
       <span class="lab">How does this song make you feel?</span>
       <input type="hidden" id="pmood">
       <div class="moods" id="moods"></div>
-      <div class="tagadd"><input id="ptag" type="text" maxlength="40" placeholder="Add your own word — e.g. bittersweet, 想家, rainy bus ride" autocomplete="off" aria-label="Add your own feeling word"><button type="button" class="link" id="ptagadd">add</button><span class="mono note" id="tagcount" style="margin:0"></span></div>
+      <div class="tagadd"><input id="ptag" type="text" maxlength="40" placeholder="Or type your own word, then press Enter — e.g. bittersweet, 想家" autocomplete="off" aria-label="Add your own feeling word"><button type="button" class="btn ghost sm" id="ptagadd">Add</button><span class="mono note" id="tagcount" style="margin:0"></span></div>
       <div class="field"><input id="panchor" type="text" placeholder="About which part? e.g. Chorus, Verse 2 (optional)"></div>
       <div class="field"><textarea id="pbody" placeholder="Anything at all — a memory, a person, a moment, or just one word. Your own words, not the song's."></textarea></div>
       <p class="pcount mono" id="pcount"></p>
@@ -1390,6 +1441,7 @@ async function renderSong(id) {
   $("ppublic").addEventListener("change", () => updateCount());
   $("moods").onclick = (e) => { const b = e.target.closest(".mood"); if (b) toggleTag(b.dataset.mood); };
   $("ptagadd").onclick = addCustomTags;
+  $("ptag").onblur = addCustomTags; // leaving the box adds what was typed, so nothing is lost
   $("ptag").onkeydown = (e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addCustomTags(); } };
   document.querySelector(".prompts").onclick = (e) => {
     const b = e.target.closest("[data-prompt]"); if (!b) return;
@@ -1406,12 +1458,14 @@ async function renderSong(id) {
   $("explain").onclick = () => explain(song);
   $("padd").onclick = async () => {
     try {
+      addCustomTags(); // a word typed but not yet added still counts
       const pub = $("ppublic").checked;
       await sendPerspective("POST", `/api/songs/${id}/perspectives`, { body: $("pbody").value, mood: $("pmood").value, anchor: $("panchor").value, design: $("pdesign").value, isPublic: pub });
       toast(pub ? "Saved and shared" : "Saved (private)"); COMM.loaded = false; renderSong(id);
     } catch (e) { $("pstat").className = "note err"; $("pstat").textContent = e.message; }
   };
 
+  if (!store.get("toured_song") && store.get("toured")) tourWhenReady("#exlist .empty, #exlist .article").then(() => { if (curSong === song) startTour(); });
   loadViews(song);
   $("simbtn").onclick = () => checkSimilar(song, true);
   checkSimilar(song, false);
@@ -1448,7 +1502,7 @@ async function renderSong(id) {
       $("padd").textContent = "Update"; $("pcancel").hidden = false;
       $("pcancel").onclick = () => renderSong(id);
       $("padd").onclick = async () => {
-        try { await sendPerspective("PUT", "/api/perspectives/" + p.id, { body: $("pbody").value, mood: $("pmood").value, anchor: $("panchor").value, design: $("pdesign").value, isPublic: $("ppublic").checked }); toast("Updated"); COMM.loaded = false; renderSong(id); }
+        try { addCustomTags(); await sendPerspective("PUT", "/api/perspectives/" + p.id, { body: $("pbody").value, mood: $("pmood").value, anchor: $("panchor").value, design: $("pdesign").value, isPublic: $("ppublic").checked }); toast("Updated"); COMM.loaded = false; renderSong(id); }
         catch (e) { $("pstat").className = "note err"; $("pstat").textContent = e.message; }
       };
       $("pbody").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1804,7 +1858,7 @@ async function summarizeViews(song) {
 let ctrl = null; // current explain request, so it can be stopped
 async function explain(song) {
   if (ctrl) { ctrl.abort(); return; } // button acts as Stop while running
-  if (!hasAI()) { toast("Connect an AI model first.", "err"); openSettings(); return; }
+  if (!hasAI()) { toast("Connect an AI model first.", "err"); openSettings(true); return; }
   const mine = (ctrl = new AbortController());
   const btn = $("explain");
   btn.textContent = "Stop"; btn.classList.add("stop");
@@ -2098,7 +2152,8 @@ $("cshare").onclick = async () => {
 function updateChrome() {
   const on = !!me;
   $("navl").style.visibility = on ? "visible" : "hidden"; // keep its space so the wordmark stays centered
-  $("aipill").hidden = !on; $("acct").hidden = !on;
+  $("guidebtn").hidden = !on; $("aipill").hidden = !on; $("acct").hidden = !on;
+  $("guidelink").hidden = !(on && guideUrl); $("guidesep").hidden = $("guidelink").hidden; if (guideUrl) $("guidelink").href = guideUrl;
   if (on) $("acct").textContent = me.email.split("@")[0].slice(0, 18);
 }
 function sessionExpired() {
@@ -2131,7 +2186,7 @@ function renderAuth(mode = "login", notice = "") {
   $("authform").onsubmit = async (e) => {
     e.preventDefault();
     if (reg && !$("agree").checked) { $("autherr").textContent = "Please tick the box to continue."; return; }
-    $("authgo").disabled = true; $("autherr").textContent = "";
+    $("authgo").disabled = true; $("authgo").classList.add("is-busy"); $("autherr").textContent = "";
     try {
       const r = await fetch(reg ? "/api/auth/register" : "/api/auth/login", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2143,8 +2198,9 @@ function renderAuth(mode = "login", notice = "") {
       if (!me.termsAccepted && !(await requireTerms())) return;
       await initAI();
       route();
+      if (!store.get("toured")) { await tourWhenReady("#lib .item, #lib .empty"); startTour(); }
     } catch (err) {
-      if ($("autherr")) { $("autherr").textContent = err.message; $("authgo").disabled = false; }
+      if ($("autherr")) { $("autherr").textContent = err.message; $("authgo").disabled = false; $("authgo").classList.remove("is-busy"); }
     }
   };
 }
@@ -2207,6 +2263,120 @@ $("delacct").onclick = async () => {
   } catch (e) { toast(e.message, "err"); }
 };
 
+/* ---------- guide: a spotlight tour that points at the real controls ---------- */
+// "Guide" in the top bar explains the page you are on: the home page, or a song. It highlights each control and says what it does.
+const HOME_TOUR = [
+  { sel: "#hsearch", t: "Search for a song", b: "Type a title and artist, or paste a YouTube link, then press Find. Pick the right result and the song is saved to your Library." },
+  { sel: ".tryrow", t: "Not sure where to start?", b: "Tap one of these examples to open a song right away." },
+  { sel: '.hint [data-act="add"]', t: "Can't find it?", b: "Add a new or indie song by hand — title, artist, and lyrics if you have them. Lyrics stay private to you." },
+  { sel: ".libhead", t: "Your Library", b: "Every song you open is kept here. Tap a card to come back to its explanation and your notes." },
+  { sel: "#libfilter", t: "Filter your Library", b: "Narrow your own songs by title or artist. This only looks at songs you already have." },
+  { sel: "#navjournal", t: "Journal", b: "Everything you wrote about songs in one place, plus feelings other members shared about the songs in your Library." },
+  { sel: "#aipill", t: "Connect an AI — once", b: "The explanations are written by an AI you connect with your own key. Pick a provider, paste the key, press Test & connect." },
+  { sel: "#acct", t: "Account", b: "Your display name, the language explanations are written in, an AI model, your data, and sign out." },
+  { sel: '.foot [data-act="feedback"]', t: "Send feedback", b: "Found a bug or have an idea? Tell us here, at the bottom of every page. It goes privately to the person running the app. Open a song and tap Guide again for the song tour." },
+];
+const SONG_TOUR = [
+  { sel: ".song-head", t: "This is your song", b: "Each song gets its own page: the explanation, what listeners say, and your own feelings." },
+  { sel: "#explain", t: "Press Explain", b: "The app finds the lyrics and what listeners say, then writes it up. It takes about a minute, and you can press Stop any time." },
+  { sel: "#langseg", t: "Choose the language", b: "What language the explanation is written in. The lyrics are never translated." },
+  { sel: "#modelslot", t: "Choose the AI", b: "If you connected more than one AI, pick which one writes this explanation." },
+  { sel: '.tab[data-tab="explain"]', tab: "explain", t: "Explanation", b: "Your saved explanations live here, newest first. Press Explain again for a new version." },
+  { sel: '.tab[data-tab="views"]', tab: "views", t: "Listeners", b: "What people write about this song elsewhere online. You can ask the AI to summarise it." },
+  { sel: '.tab[data-tab="community"]', tab: "community", t: "Community", b: "Feelings other members here chose to share about this song. Be kind — you can report anything that isn't." },
+  { sel: '.tab[data-tab="notes"]', tab: "notes", t: "My feelings", b: "Your own space for this song. The next few steps show how it works." },
+  { sel: "#moods", tab: "notes", t: "Pick a word", b: "Tap the words that fit. You can pick up to five." },
+  { sel: ".tagadd", tab: "notes", t: "Or type your own", b: "Any word, in any language. Press Enter or Add — a word you leave in the box is added for you when you save." },
+  { sel: "#pbody", tab: "notes", t: "Say it in your own words", b: "A memory, a person, a moment, or just one word. Not sure where to start? Tap one of the prompts underneath." },
+  { sel: "#designs", tab: "notes", t: "Make it a card", b: "Choose how your feeling looks — note, poster, letter and more. The preview shows it live." },
+  { sel: "#p-notes .check", tab: "notes", t: "Private or shared", b: "Your feeling is private unless you tick this. Shared ones appear in Community under your display name." },
+  { sel: "#padd", tab: "notes", t: "Save it", b: "Saved feelings show up below and in your Journal. You can edit or delete them later." },
+  { sel: '.tab[data-tab="lyrics"]', tab: "lyrics", t: "Lyrics", b: "Private to you, only used to help the AI. The app looks them up for you; you can also paste your own." },
+  { sel: "#cardbtn", t: "Lyric card", b: "Turn a few lines, or your own words, into an image to share." },
+  { sel: "#simbtn", t: "Same song, different spelling?", b: "If this song exists twice under different spellings, link them so their Community feelings are shared." },
+  { sel: "#delsong", t: "Delete song", b: "Removes this song and everything you saved for it. You will be asked to confirm." },
+];
+
+let TOUR = null;
+const tourVis = (el) => !!el && el.getClientRects().length > 0;
+function startTour() {
+  if (TOUR) return;
+  const onSong = /^#\/song\/\d+/.test(location.hash) && !!$("explain");
+  const prevTab = curTab;
+  const steps = (onSong ? SONG_TOUR : HOME_TOUR).filter((st) => {
+    if (st.tab) showTab(st.tab);
+    return tourVis(document.querySelector(st.sel));
+  });
+  if (onSong) showTab(prevTab);
+  if (!steps.length) return;
+  store.set(onSong ? "toured_song" : "toured", "1");
+  const back = document.createElement("div"); back.className = "tour-back";
+  const hole = document.createElement("div"); hole.className = "tour-hole";
+  const pop = document.createElement("div"); pop.className = "tour-pop"; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-live", "polite");
+  document.body.append(back, hole, pop);
+  TOUR = { steps, i: 0, back, hole, pop, onSong, prevTab };
+  window.addEventListener("resize", tourPlace); window.addEventListener("scroll", tourPlace, true); document.addEventListener("keydown", tourKey);
+  tourShow();
+}
+function tourShow() {
+  const T = TOUR; if (!T) return;
+  const st = T.steps[T.i];
+  if (st.tab) showTab(st.tab);
+  const el = document.querySelector(st.sel);
+  if (!tourVis(el)) { if (T.i < T.steps.length - 1) { T.i++; tourShow(); } else endTour(); return; }
+  const r = el.getBoundingClientRect();
+  if (r.top < 60 || r.bottom > innerHeight - 20) el.scrollIntoView({ block: "center", behavior: "auto" });
+  const last = T.i === T.steps.length - 1;
+  T.pop.innerHTML = `<div class="tour-meta"><span>${T.i + 1} / ${T.steps.length}</span><span class="grow"></span><button class="link" type="button" data-tour="end">Close</button></div>
+    <h4>${esc(st.t)}</h4><p>${esc(st.b)}</p>
+    <div class="tour-bar">${T.i ? '<button class="btn ghost" type="button" data-tour="back">Back</button>' : ""}<button class="btn" type="button" data-tour="next">${last ? "Done" : "Next"}</button></div>`;
+  T.pop.querySelector('[data-tour="next"]').focus({ preventScroll: true });
+  tourPlace();
+}
+function tourPlace() {
+  const T = TOUR; if (!T) return;
+  const el = document.querySelector(T.steps[T.i].sel);
+  if (!tourVis(el)) return;
+  const r = el.getBoundingClientRect(), pad = 8, h = T.hole.style;
+  h.left = r.left - pad + "px"; h.top = r.top - pad + "px"; h.width = r.width + pad * 2 + "px"; h.height = r.height + pad * 2 + "px";
+  const pw = T.pop.offsetWidth, ph = T.pop.offsetHeight, gap = 14;
+  let top;
+  if (innerHeight - r.bottom - pad > ph + gap + 8) top = r.bottom + pad + gap;
+  else if (r.top - pad > ph + gap + 8) top = r.top - pad - gap - ph;
+  else top = innerHeight - ph - 12;
+  T.pop.style.top = Math.max(12, top) + "px";
+  T.pop.style.left = Math.min(Math.max(12, r.left), Math.max(12, innerWidth - pw - 12)) + "px";
+}
+function endTour() {
+  const T = TOUR; if (!T) return;
+  TOUR = null;
+  T.back.remove(); T.hole.remove(); T.pop.remove();
+  window.removeEventListener("resize", tourPlace); window.removeEventListener("scroll", tourPlace, true); document.removeEventListener("keydown", tourKey);
+  if (T.onSong && $("explain")) showTab(T.prevTab);
+}
+function tourKey(e) {
+  if (e.key === "Escape") endTour();
+  else if (e.key === "ArrowRight" || e.key === "Enter") { if (e.target.closest?.('[data-tour="back"]')) return; e.preventDefault(); tourNext(1); }
+  else if (e.key === "ArrowLeft") tourNext(-1);
+}
+function tourNext(d) {
+  const T = TOUR; if (!T) return;
+  const n = T.i + d;
+  if (n >= T.steps.length) { endTour(); return; }
+  if (n < 0) return;
+  T.i = n; tourShow();
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.("[data-tour]"); if (!b) return;
+  const a = b.dataset.tour;
+  if (a === "end") endTour(); else tourNext(a === "back" ? -1 : 1);
+});
+// Wait for the page to finish drawing before the tour looks for its controls.
+async function tourWhenReady(sel) {
+  for (let i = 0; i < 40 && !document.querySelector(sel); i++) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 400));
+}
+
 /* ---------- router ---------- */
 function route() {
   if (!me) { renderAuth(); return; }
@@ -2214,12 +2384,13 @@ function route() {
   if (vctrl) vctrl.abort();
   window.scrollTo(0, 0);
   document.querySelectorAll(".navl a").forEach((x) => x.classList.remove("on"));
-  if (location.hash === "#/journal") { curTab = "explain"; renderJournal(); return; }
+  const open = (p) => { const end = busy("Opening"); Promise.resolve(p).finally(end); };
+  if (location.hash === "#/journal") { curTab = "explain"; open(renderJournal()); return; }
   const sm = location.hash.match(/^#\/search\/(.+)$/);
   if (sm) { curTab = "explain"; let q = sm[1]; try { q = decodeURIComponent(q); } catch {} renderSearch(q); return; }
   const m = location.hash.match(/^#\/song\/(\d+)/);
   if (!m) curTab = "explain";
-  m ? renderSong(m[1]) : renderHome();
+  open(m ? renderSong(m[1]) : renderHome());
 }
 window.addEventListener("hashchange", route);
 (async function boot() {
@@ -2231,4 +2402,5 @@ window.addEventListener("hashchange", route);
   if (me && !me.termsAccepted && !(await requireTerms())) return;
   if (me) await initAI();
   route();
+  if (me && !store.get("toured") && !/^#\/song\//.test(location.hash)) { await tourWhenReady("#lib .item, #lib .empty"); startTour(); } // first visit: show the home tour once
 })();

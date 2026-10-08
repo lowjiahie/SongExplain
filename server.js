@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "node:crypto";
 import * as db from "./db.js";
 import * as auth from "./auth.js";
 import { fetchLyrics } from "./lyrics.js";
@@ -123,6 +124,27 @@ app.post("/api/auth/logout", (req, res) => {
 
 // Everything below needs a signed-in user, and only ever touches that user's own data.
 app.use("/api", auth.requireUser);
+
+// A slow server makes people click again. If the very same request (same person, same address, same content) arrives
+// again within a few seconds, it is NOT run a second time: the second click waits for the first and gets the same answer.
+// So a double click can never create two songs, two feelings, two reports. (Streaming AI calls and connection tests are left out.)
+const RECENT_WRITES = new Map();
+const DEDUPE_SKIP = /\/explain$|\/views\/summary$|^\/ai\//;
+app.use("/api", (req, res, next) => {
+  if (!["POST", "PUT", "DELETE"].includes(req.method) || DEDUPE_SKIP.test(req.path) || !req.user) return next();
+  const now = Date.now();
+  for (const [k, v] of RECENT_WRITES) if (v.exp < now) RECENT_WRITES.delete(k);
+  const key = `${req.user.id} ${req.method} ${req.originalUrl} ${crypto.createHash("sha1").update(JSON.stringify(req.body ?? null)).digest("hex")}`;
+  const hit = RECENT_WRITES.get(key);
+  if (hit) return hit.answer.then((a) => res.status(a.status).json(a.body ?? { ok: true }));
+  let settle;
+  const answer = new Promise((r) => (settle = r));
+  RECENT_WRITES.set(key, { exp: now + 8000, answer });
+  const send = res.json.bind(res);
+  res.json = (body) => { settle({ status: res.statusCode, body }); return send(body); };
+  res.on("finish", () => { settle({ status: res.statusCode, body: null }); if (res.statusCode >= 400) RECENT_WRITES.delete(key); }); // a failed attempt may be retried at once
+  next();
+});
 
 // Album covers for lyric cards. The browser can only export a canvas as an image if the cover comes
 // from our own origin, so we fetch it here. Only Apple's image CDN over https is allowed.

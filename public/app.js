@@ -179,6 +179,7 @@ let aiModelOpen = false;   // the model name field is open
 
 let aiFirst = false;
 async function openSettings(first) {
+  $("acctdlg").close(); // opened from Account on a phone: show only one dialog
   aiFirst = !!first;
   $("airemember").checked = keyMode() === "server";
   aiAdding = false; aiOther = false; aiModelOpen = false;

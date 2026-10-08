@@ -414,6 +414,18 @@
     .navl a, .navl button, .toplink { white-space:nowrap; font-size:.72rem }
   }
   @media (prefers-reduced-motion:reduce) { *, ::before, ::after { animation:none !important; transition:none !important } }
+  /* ---------- phone header: row 1 = logo, Guide, theme; row 2 = Library · Journal, account ---------- */
+  @media (max-width:560px) {
+    .bar { grid-template-columns:minmax(0,1fr) auto auto; gap:12px 10px; align-items:center }
+    .wordmark { grid-column:1; grid-row:1; text-align:left; margin:0; font-size:1.6rem }
+    .right { display:contents }
+    .guidebtn { grid-column:2; grid-row:1; width:34px; height:34px; padding:0; justify-content:center; gap:0; font-size:0 } .guidebtn svg { width:20px; height:20px }
+    #theme { grid-column:3; grid-row:1 }
+    .navl { grid-column:1; grid-row:2; flex-wrap:nowrap; gap:20px }
+    #acct { grid-column:2 / 4; grid-row:2; justify-self:end; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    #aipill { grid-column:1 / -1; grid-row:3; justify-self:start }
+    #aipill:not(.warn) { display:none }
+  }
 </style>
 </head>
 <body>
@@ -555,6 +567,11 @@
 <dialog id="acctdlg"><div class="dlg">
   <div class="row"><h3 class="grow">Account</h3><button class="link" data-close="acctdlg">Close</button></div>
   <p class="acctwho" id="acctemail"></p>
+
+  <section class="sec"><h4>AI</h4>
+    <p class="note" style="margin:0 0 12px">The AI that writes the explanations.</p>
+    <button class="btn ghost sm" data-act="settings" type="button">AI settings</button>
+  </section>
 
   <section class="sec"><h4>Profile</h4>
     <div class="field"><label for="acctname">Display name <span class="mono">— shown on feelings you share</span></label><div class="inline"><input id="acctname" type="text" maxlength="24" autocomplete="nickname"><button class="btn ghost sm" id="acctnamesave" type="button">Save name</button></div></div>

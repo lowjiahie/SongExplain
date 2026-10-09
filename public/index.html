@@ -224,7 +224,7 @@
 
   /* ---- card designs: each is built differently, not just recoloured ---- */
   .entry { color:var(--ink) }
-  .e-ticket, .e-photo, .e-cap, .e-dear, .e-sign { display:none }
+  .e-ticket, .e-photo, .e-cap, .e-dear, .e-sign, .e-deco { display:none }
   .e-body::before { content:none }
 
   /* Editorial: the site's own look — hairline box, a short black rule, big grotesk type */
@@ -329,6 +329,77 @@
   /* an explanation that stopped half-way */
   .interrupted { margin:30px 0 0; padding:18px 20px; border:1px solid var(--danger); border-left-width:6px } .interrupted b { display:block; font:700 1.1rem var(--display); color:var(--danger) } .interrupted p { margin:8px 0 0 } .interrupted .row { margin-top:14px }
   .article.partial { opacity:.7; margin-top:22px }
+  /* more card designs */
+  .dz-film { --sw:#161616 } .dz-vinyl { --sw:#f4f0e6 } .dz-cassette { --sw:#e7d9b8 } .dz-notebook { --sw:#e3eef7 } .dz-collage { --sw:#ddd6c8 } .dz-receipt { --sw:#fffefa } .dz-postcard { --sw:#f3e3d0 } .dz-magazine { --sw:#d94f30 } .dz-stamp { --sw:#fff8ec }
+  /* fifteen styles in one scrolling row instead of a tall block of chips */
+  .designs { flex-wrap:nowrap; overflow-x:auto; padding-bottom:10px; scrollbar-width:thin; scroll-snap-type:x proximity } .dz { flex:none; scroll-snap-align:start }
+  /* Film strip: dark frame, sprocket holes top and bottom */
+  .entry.d-film { --paper:#161616; --ink:#f2efe6; --muted:#a8a396; --hair:rgba(242,239,230,.25); --rule:#f2efe6; border:0; border-radius:3px; padding:38px 24px 36px; box-shadow:0 14px 26px -18px rgba(0,0,0,.7) }
+  .entry.d-film .e-bar, .entry.d-film .e-song { display:none }
+  .entry.d-film::before, .entry.d-film::after { content:""; position:absolute; left:0; right:0; height:11px; background:repeating-linear-gradient(90deg,#f2efe6 0 9px,transparent 9px 20px) 7px 0/auto 11px; opacity:.85 }
+  .entry.d-film::before { top:12px } .entry.d-film::after { bottom:12px }
+  .entry.d-film .e-cap { display:block; color:var(--muted); font:500 .66rem var(--mono); letter-spacing:.14em; text-transform:uppercase } .entry.d-film .e-cap::before { content:"▶ " } .entry.d-film .e-cap a { text-decoration:none }
+  .entry.d-film .e-body { padding-top:14px; font:700 1.25rem/1.45 var(--display) } .entry.d-film .e-body.short { font-size:1.8rem; line-height:1.2 }
+  /* Vinyl: record sleeve with the disc, the cover as its label */
+  .entry.d-vinyl { --paper:#f4f0e6; --ink:#221f1a; --muted:#7a7468; --hair:rgba(34,31,26,.2); --rule:#221f1a; border:0; border-radius:2px; padding:22px 22px 14px; box-shadow:0 14px 26px -18px rgba(0,0,0,.6) }
+  .entry.d-vinyl .e-bar, .entry.d-vinyl .e-song { display:none }
+  .entry.d-vinyl .e-photo { display:block; position:relative; float:right; box-sizing:border-box; width:104px; height:104px; margin:0 0 10px 14px; border:20px solid #111; border-radius:50%; overflow:hidden; background:hsl(var(--h) 18% 70%) }
+  .entry.d-vinyl .e-photo::after { content:""; position:absolute; left:50%; top:50%; width:7px; height:7px; border-radius:50%; background:#f4f0e6; transform:translate(-50%,-50%) }
+  .entry.d-vinyl .e-cap { display:block; color:var(--muted); font:500 .66rem var(--mono); letter-spacing:.14em; text-transform:uppercase } .entry.d-vinyl .e-cap::before { content:"Side A · " } .entry.d-vinyl .e-cap a { text-decoration:none }
+  .entry.d-vinyl .e-body { padding-top:10px; font:700 1.2rem/1.5 var(--display) }
+  .entry.d-vinyl .e-tags, .entry.d-vinyl .e-foot { clear:both }
+  /* Cassette: label with two reels */
+  .entry.d-cassette { --paper:#e7d9b8; --ink:#3a2c14; --muted:#7a6a45; --hair:rgba(58,44,20,.3); --rule:#3a2c14; border:0; border-radius:8px; padding:18px 20px 14px; box-shadow:0 14px 26px -18px rgba(0,0,0,.55) }
+  .entry.d-cassette .e-bar, .entry.d-cassette .e-song { display:none }
+  .entry.d-cassette .e-deco { display:flex; align-items:center; justify-content:space-between; height:46px; margin-bottom:12px; padding:0 22px; border:2px solid var(--ink); border-radius:5px; background:#f6edd3 }
+  .entry.d-cassette .e-deco::before, .entry.d-cassette .e-deco::after { content:""; box-sizing:border-box; width:24px; height:24px; border:5px double var(--ink); border-radius:50% }
+  .entry.d-cassette .e-cap { display:block; font:700 .76rem var(--mono); letter-spacing:.08em; text-transform:uppercase } .entry.d-cassette .e-cap::before { content:"Side A — " } .entry.d-cassette .e-cap a { text-decoration:none }
+  .entry.d-cassette .e-body { padding-top:6px; font:500 .98rem/1.7 var(--mono) }
+  /* Notebook: graph paper and spiral holes */
+  .entry.d-notebook { --paper:#fbfbf6; --ink:#1f3a5f; --muted:#6a7f98; --hair:rgba(31,58,95,.2); --rule:#1f3a5f; border:0; border-radius:2px; padding:22px 22px 14px 48px; box-shadow:0 14px 26px -18px rgba(0,0,0,.5);
+    background-image:linear-gradient(rgba(120,160,200,.35) 1px,transparent 1px),linear-gradient(90deg,rgba(120,160,200,.35) 1px,transparent 1px); background-size:20px 20px }
+  .entry.d-notebook .e-bar, .entry.d-notebook .e-song { display:none }
+  .entry.d-notebook::before { content:""; position:absolute; left:14px; top:12px; bottom:12px; width:14px; background:radial-gradient(circle at 7px 8px,#e9e9e2 5px,#b8b8ae 5.5px,transparent 6.5px) 0 0/14px 30px repeat-y }
+  .entry.d-notebook .e-body { padding-top:0; font:500 1.1rem/20px "Caveat","Noto Sans SC","PingFang SC","Microsoft YaHei",var(--body),sans-serif } .entry.d-notebook .e-body.short { font-size:1.5rem }
+  .entry.d-notebook .e-foot { border-top:0 }
+  /* Collage: a torn scrap, taped, on kraft paper */
+  .entry.d-collage { --paper:#ddd6c8; --ink:#2a2a2a; --muted:#6f685a; --hair:rgba(42,42,42,.25); --rule:#2a2a2a; overflow:visible; border:0; border-radius:2px; padding:30px 22px 14px; box-shadow:0 14px 26px -18px rgba(0,0,0,.55) }
+  .entry.d-collage .e-bar, .entry.d-collage .e-song { display:none }
+  .entry.d-collage::after { content:""; position:absolute; top:12px; left:34px; width:76px; height:24px; background:rgba(255,226,110,.75); transform:rotate(-6deg); z-index:2 }
+  .entry.d-collage .e-body { margin:6px 0 0; padding:20px 18px; background:#fff; color:#2a2a2a; transform:rotate(var(--rot,0deg)); font:600 1rem/1.7 var(--body); clip-path:polygon(0 3%,4% 0,9% 2%,15% 0,22% 3%,30% 0,38% 2%,47% 0,55% 3%,63% 0,72% 2%,80% 0,88% 3%,95% 0,100% 2%,100% 100%,0 100%) }
+  .entry.d-collage .tag { background:#fff; border-color:var(--ink); color:var(--ink) }
+  /* Receipt: a till receipt with a torn bottom edge */
+  .entry.d-receipt { --paper:#fffefa; --ink:#161616; --muted:#6f6f6f; --hair:rgba(0,0,0,.35); --rule:#161616; overflow:visible; max-width:380px; border:0; border-radius:0; padding:22px 20px 24px; margin-bottom:34px; font-family:var(--mono); box-shadow:0 12px 20px -16px rgba(0,0,0,.6) }
+  .entry.d-receipt .e-bar, .entry.d-receipt .e-song { display:none }
+  .entry.d-receipt::after { content:""; position:absolute; left:0; right:0; bottom:-10px; height:10px; background:linear-gradient(135deg,var(--paper) 50%,transparent 50%) 0 0/14px 10px, linear-gradient(225deg,var(--paper) 50%,transparent 50%) 0 0/14px 10px }
+  .entry.d-receipt .e-ticket { display:block; padding-bottom:12px; margin-bottom:12px; border-bottom:2px dashed var(--ink); text-align:center; font:500 .64rem var(--mono); letter-spacing:.1em } .entry.d-receipt .e-ticket .t1 { display:block; font-size:0; margin-bottom:4px } .entry.d-receipt .e-ticket .t1::before { content:"SONG EXPLAIN"; font:700 1rem var(--mono); letter-spacing:.14em }
+  .entry.d-receipt .e-cap { display:block; margin-bottom:8px; font:700 .86rem var(--mono) } .entry.d-receipt .e-cap::before { content:"1 × " } .entry.d-receipt .e-cap a { text-decoration:none }
+  .entry.d-receipt .e-body { padding-top:2px; font:500 .84rem/1.75 var(--mono) } .entry.d-receipt .e-foot { border-top:2px dashed var(--ink) }
+  .entry.d-receipt .e-sign { display:block; margin-top:10px; text-align:center; font-size:0 } .entry.d-receipt .e-sign::before { content:"*** THANK YOU ***"; font:500 .7rem var(--mono); letter-spacing:.1em }
+  /* Postcard: handwritten message, a stamp box and a postmark */
+  .entry.d-postcard { --paper:#f3e3d0; --ink:#4a2b1a; --muted:#8a6a55; --hair:rgba(74,43,26,.3); --rule:#4a2b1a; border:0; border-radius:2px; padding:22px 22px 14px; box-shadow:0 14px 26px -18px rgba(0,0,0,.55) }
+  .entry.d-postcard .e-bar, .entry.d-postcard .e-song { display:none }
+  .entry.d-postcard .e-deco { display:block; float:right; width:56px; height:68px; margin:0 0 10px 14px; border:2px dashed var(--ink); background:hsl(var(--h) 30% 80%) }
+  .entry.d-postcard .e-cap { display:block; color:var(--muted); font:500 .64rem var(--mono); letter-spacing:.16em; text-transform:uppercase } .entry.d-postcard .e-cap::before { content:"Postcard · " } .entry.d-postcard .e-cap a { text-decoration:none }
+  .entry.d-postcard .e-body { padding-top:10px; font:600 1.4rem/1.45 "Caveat","Noto Sans SC","PingFang SC","Microsoft YaHei",var(--body),sans-serif }
+  .entry.d-postcard .e-tags, .entry.d-postcard .e-foot { clear:both }
+  .entry.d-postcard .e-sign { display:block; margin-top:8px; text-align:right; font:italic 400 .9rem Georgia,serif }
+  /* Magazine: the song as the masthead, the feeling as a cover line */
+  .entry.d-magazine { --paper:hsl(var(--h) 62% 46%); --ink:#fff; --muted:rgba(255,255,255,.82); --hair:rgba(255,255,255,.4); --rule:#fff; border:0; border-radius:0; padding:20px 22px 14px; box-shadow:0 18px 30px -22px rgba(0,0,0,.7) }
+  .entry.d-magazine .e-bar, .entry.d-magazine .e-song { display:none }
+  .entry.d-magazine .e-ticket { display:flex; justify-content:space-between; padding-bottom:8px; margin-bottom:12px; border-bottom:4px solid #fff; font:500 .64rem var(--mono); letter-spacing:.18em } .entry.d-magazine .e-ticket .t1 { font-size:0 } .entry.d-magazine .e-ticket .t1::before { content:"SONG EXPLAIN"; font-size:.64rem }
+  .entry.d-magazine .e-cap { display:block; font:700 2rem/.95 var(--display); letter-spacing:-.03em; text-transform:uppercase; overflow-wrap:anywhere } .entry.d-magazine .e-cap a { text-decoration:none }
+  .entry.d-magazine .e-body { max-width:86%; padding-top:16px; font:700 1rem/1.5 var(--body) } .entry.d-magazine .tag { border-color:#fff; color:#fff }
+  /* Stamp: perforated edge, a frame inside, a postmark over the corner */
+  .entry.d-stamp { --paper:#fff8ec; --ink:#3a2a1a; --muted:#8a7658; --hair:rgba(58,42,26,.3); --rule:#3a2a1a; overflow:visible; max-width:440px; border:0; border-radius:0; box-shadow:none; padding:34px 34px 22px; filter:drop-shadow(0 12px 14px rgba(0,0,0,.3));
+    background:radial-gradient(circle at 50% 0,var(--bg) 5px,transparent 5.5px) 0 0/16px 9px repeat-x, radial-gradient(circle at 50% 100%,var(--bg) 5px,transparent 5.5px) 0 100%/16px 9px repeat-x, radial-gradient(circle at 0 50%,var(--bg) 5px,transparent 5.5px) 0 0/9px 16px repeat-y, radial-gradient(circle at 100% 50%,var(--bg) 5px,transparent 5.5px) 100% 0/9px 16px repeat-y, #fff8ec }
+  .entry.d-stamp .e-bar, .entry.d-stamp .e-song { display:none }
+  .entry.d-stamp::before { content:""; position:absolute; inset:14px; border:2px solid var(--ink); pointer-events:none }
+  .entry.d-stamp .e-ticket { display:flex; justify-content:space-between; margin-bottom:12px; font:500 .62rem var(--mono); letter-spacing:.14em } .entry.d-stamp .e-ticket .t1 { font-size:0 } .entry.d-stamp .e-ticket .t1::before { content:"SONG EXPLAIN"; font-size:.62rem }
+  .entry.d-stamp .e-photo { display:block; aspect-ratio:1; max-width:170px; overflow:hidden; float:left; margin:0 14px 8px 0; background:hsl(var(--h) 18% 80%) }
+  .entry.d-stamp .e-cap { display:block; font:700 1rem var(--display) } .entry.d-stamp .e-cap a { text-decoration:none }
+  .entry.d-stamp .e-body { padding-top:8px; font:600 .98rem/1.6 var(--body) } .entry.d-stamp .e-tags, .entry.d-stamp .e-foot { clear:both }
+  .entry.d-stamp .e-deco { display:block; position:absolute; right:26px; bottom:60px; width:74px; height:74px; border:2px solid rgba(58,42,26,.5); border-radius:50%; transform:rotate(-16deg); background:repeating-linear-gradient(0deg,transparent 0 10px,rgba(58,42,26,.45) 10px 12px); pointer-events:none }
   .libfilter { display:flex; gap:14px; align-items:center; max-width:420px; margin:0 0 30px } .libfilter input { flex:1; min-width:0 }
   .mood:hover { color:var(--ink) } .mood[aria-pressed=true] { color:var(--ink); border-bottom-color:var(--rule) }
   /* a feeling is a small memory card: song on top, the words as a quote, feeling words as pills, small print below */
@@ -547,7 +618,8 @@
     <div>
       <div class="field"><label>Text</label><div class="seg wrapseg" id="cmode"><button data-v="lyrics" aria-pressed="true">From the lyrics</button><button data-v="own" aria-pressed="false">My own words</button></div></div>
       <div id="cpick"></div>
-      <div class="field"><label>Style</label><div class="seg wrapseg" id="ctheme"><button data-v="paper" aria-pressed="true">Paper</button><button data-v="ink" aria-pressed="false">Ink</button><button data-v="color" aria-pressed="false">Cover colour</button></div></div>
+      <div class="field"><label>Design</label><div class="seg wrapseg" id="cdesign"></div></div>
+      <div class="field" id="cthemef"><label>Colour</label><div class="seg wrapseg" id="ctheme"><button data-v="paper" aria-pressed="true">Paper</button><button data-v="ink" aria-pressed="false">Ink</button><button data-v="color" aria-pressed="false">Cover colour</button></div></div>
       <div class="field"><label>Size</label><div class="seg wrapseg" id="cfmt"><button data-v="story" aria-pressed="true">Story 9:16</button><button data-v="square" aria-pressed="false">Square 1:1</button></div></div>
       <div class="row" style="margin-top:22px"><button class="btn" id="cdl">Download PNG</button><button class="btn ghost" id="cshare" hidden>Share</button></div>
       <p class="note">Choose up to 4 short lines. A card is meant for sharing a small excerpt with a credit to the song — not whole lyrics.</p>

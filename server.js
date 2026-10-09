@@ -626,7 +626,7 @@ const cleanTags = (raw) =>
   [...new Set(String(Array.isArray(raw) ? raw.join(",") : raw || "").split(/[,，、;；\n]/).map((t) => t.trim().replace(/\s+/g, " ").slice(0, MAX_TAG_LEN)).filter(Boolean))]
     .slice(0, MAX_TAGS).join(",");
 // The look of the card a feeling is shown on. Only these names are accepted.
-const DESIGNS = ["paper", "poster", "sticky", "polaroid", "ticket", "letter"];
+const DESIGNS = ["paper", "poster", "sticky", "polaroid", "ticket", "letter", "film", "vinyl", "cassette", "notebook", "collage", "receipt", "postcard", "magazine", "stamp"];
 const perspectiveInput = (req, res) => {
   const body = String(req.body?.body || "").trim();
   if (body.length < 2 || body.length > 5000) return bad(res, "Write between 2 and 5000 characters"), null;

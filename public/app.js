@@ -1124,6 +1124,8 @@ const getTags = () => parseTags($("pmood").value);
 const DESIGNS = [
   { id: "paper", label: "Editorial" }, { id: "poster", label: "Poster" }, { id: "sticky", label: "Sticky note" },
   { id: "polaroid", label: "Polaroid" }, { id: "ticket", label: "Ticket" }, { id: "letter", label: "Letter" },
+  { id: "film", label: "Film strip" }, { id: "vinyl", label: "Vinyl" }, { id: "cassette", label: "Cassette" }, { id: "notebook", label: "Notebook" },
+  { id: "collage", label: "Collage" }, { id: "receipt", label: "Receipt" }, { id: "postcard", label: "Postcard" }, { id: "magazine", label: "Magazine" }, { id: "stamp", label: "Stamp" },
 ];
 const designOf = (d) => (DESIGNS.some((x) => x.id === d) ? d : "paper"); // an unknown or retired design shows as Editorial
 const HAND_STACK = '"Caveat","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
@@ -1153,7 +1155,8 @@ function entryHTML({ song, showSong = false, author = "", you = false, imgAuthor
   const cap = showSong ? `<a href="#/song/${song.id}">${esc(song.title)} · ${esc(song.artist)}</a>` : `${esc(song.title)} · ${esc(song.artist)}`;
   const photo = song.cover ? `<img src="${esc(song.cover)}" alt="" loading="lazy" data-initial="${esc([...String(song.title)][0] || "♪")}">` : `<span class="ph">${esc([...String(song.title)][0] || "♪")}</span>`;
   return `<article class="entry d-${d}${d === "sticky" ? " note" : ""}${preview ? " preview" : ""}${long ? " clamped" : ""}" style="--h:${h};--rot:${rot}deg"><span class="e-bar"></span>
-    <div class="e-ticket"><span>ADMIT ONE</span><span>No. ${feelNo(body)}</span></div>
+    <div class="e-ticket"><span class="t1">ADMIT ONE</span><span class="t2">No. ${feelNo(body)}</span></div>
+    <div class="e-deco"></div>
     <div class="e-photo">${photo}</div>
     ${head}
     <div class="e-cap">${cap}</div>
@@ -1330,10 +1333,149 @@ const DRAW = {
     ctx.fillStyle = ink; ctx.font = `700 34px ${SERIF_STACK}`; ctx.textAlign = "right"; ctx.fillText("Song Explain.", W - 100, H - 116); ctx.textAlign = "left";
   },
 };
+// More designs, drawn the same way (see the CSS in index.html for how they look on screen).
+const capLine = (ctx, song, maxW) => wrapLines(ctx, `${song.title || ""} · ${song.artist || ""}`, maxW)[0] || "";
+Object.assign(DRAW, {
+  // a strip of film: dark frame, sprocket holes, caption in the margin
+  film(ctx, p, cover, W, H, hue) {
+    const pad = 120, ink = "#f2efe6", mute = "#a8a396", song = p.song;
+    ctx.fillStyle = "#161616"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = ink; for (let x = 34; x < W; x += 62) { ctx.beginPath(); ctx.roundRect(x, 24, 30, 44, 6); ctx.fill(); ctx.beginPath(); ctx.roundRect(x, H - 68, 30, 44, 6); ctx.fill(); }
+    ctx.strokeStyle = "rgba(242,239,230,.3)"; ctx.lineWidth = 3; ctx.strokeRect(70, 120, W - 140, H - 240);
+    ctx.fillStyle = mute; ctx.font = `500 26px ${MONO_STACK}`; ctx.fillText("▶ " + capLine(ctx, song, W - pad * 2 - 40).toUpperCase(), pad, 190);
+    const t = fitText(ctx, p.body, (s) => `700 ${s}px ${SERIF_STACK}`, W - pad * 2, H - 250 - 480, 88, 34, 1.26);
+    ctx.fillStyle = ink; ctx.font = `700 ${t.size}px ${SERIF_STACK}`;
+    t.lines.forEach((l, i) => ctx.fillText(l, pad, 290 + t.size + i * t.lh));
+    drawPills(ctx, p.tags, pad, 290 + t.lines.length * t.lh + 36, W - pad, H - 330, ink);
+    ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(p.author ? `— ${p.author} · ${p.date}` : p.date, pad, H - 175);
+    ctx.fillStyle = ink; ctx.font = `700 34px ${SERIF_STACK}`; ctx.textAlign = "right"; ctx.fillText("Song Explain.", W - pad, H - 172); ctx.textAlign = "left";
+  },
+  // a record sleeve with the disc sliding out, the cover as its label
+  vinyl(ctx, p, cover, W, H, hue) {
+    const pad = 100, ink = "#221f1a", mute = "#7a7468", song = p.song, cx = W / 2, cy = 420, R = 290;
+    ctx.fillStyle = "#f4f0e6"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.1)"; ctx.lineWidth = 2; for (let r = 150; r < R - 6; r += 17) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 120, 0, Math.PI * 2); ctx.clip();
+    if (cover) ctx.drawImage(cover, cx - 120, cy - 120, 240, 240); else { ctx.fillStyle = `hsl(${hue} 30% 60%)`; ctx.fillRect(cx - 120, cy - 120, 240, 240); }
+    ctx.restore(); ctx.fillStyle = "#f4f0e6"; ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = mute; ctx.font = `500 26px ${MONO_STACK}`; ctx.textAlign = "center"; ctx.fillText("SIDE A  ·  " + capLine(ctx, song, W - pad * 2 - 200).toUpperCase(), cx, 780); ctx.textAlign = "left";
+    const t = fitText(ctx, p.body, (s) => `700 ${s}px ${SERIF_STACK}`, W - pad * 2, H - pad - 220 - 830, 70, 32, 1.3);
+    ctx.fillStyle = ink; ctx.font = `700 ${t.size}px ${SERIF_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, pad, 830 + t.size + i * t.lh));
+    drawPills(ctx, p.tags, pad, 830 + t.lines.length * t.lh + 30, W - pad, H - 260, ink);
+    drawFooter(ctx, p, W, H, pad, ink, mute);
+  },
+  // a cassette label with two reels
+  cassette(ctx, p, cover, W, H, hue) {
+    const pad = 100, ink = "#3a2c14", mute = "#7a6a45", song = p.song;
+    ctx.fillStyle = "#e7d9b8"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#f6edd3"; ctx.strokeStyle = ink; ctx.lineWidth = 5; ctx.beginPath(); ctx.roundRect(pad, 110, W - pad * 2, 240, 14); ctx.fill(); ctx.stroke();
+    for (const x of [pad + 150, W - pad - 150]) { ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(x, 230, 56, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, 230, 30, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = ink; ctx.font = `700 30px ${MONO_STACK}`; ctx.textAlign = "center"; ctx.fillText("C-60", W / 2, 215); ctx.font = `500 24px ${MONO_STACK}`; ctx.fillText("SIDE A", W / 2, 255); ctx.textAlign = "left";
+    ctx.font = `700 34px ${MONO_STACK}`; ctx.fillText(capLine(ctx, song, W - pad * 2).toUpperCase(), pad, 440);
+    const t = fitText(ctx, p.body, (s) => `500 ${s}px ${MONO_STACK}`, W - pad * 2, H - pad - 220 - 500, 52, 26, 1.55);
+    ctx.font = `500 ${t.size}px ${MONO_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, pad, 500 + t.size + i * t.lh));
+    drawPills(ctx, p.tags, pad, 500 + t.lines.length * t.lh + 30, W - pad, H - 260, ink, ink, `500 24px ${MONO_STACK}`);
+    drawFooter(ctx, p, W, H, pad, ink, mute);
+  },
+  // graph paper with spiral-binding holes
+  notebook(ctx, p, cover, W, H, hue) {
+    const pad = 150, ink = "#1f3a5f", mute = "#6a7f98", song = p.song, g = 54;
+    ctx.fillStyle = "#fbfbf6"; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(120,160,200,.4)"; ctx.lineWidth = 2; for (let x = 0; x < W; x += g) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } for (let y = 0; y < H; y += g) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.fillStyle = "#e9e9e2"; for (let y = 70; y < H - 40; y += 90) { ctx.beginPath(); ctx.arc(60, y, 17, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = "#b8b8ae"; ctx.lineWidth = 3; ctx.stroke(); }
+    ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(p.date, pad, 128); ctx.fillText(capLine(ctx, song, W - pad - 100), pad, 182);
+    const fontFn = (s) => `500 ${s}px ${HAND_STACK}`;
+    ctx.font = fontFn(54); const lines = wrapLines(ctx, p.body, W - pad - 100); const max = Math.floor((H - 520) / g);
+    const shown = lines.slice(0, max); if (lines.length > max) shown[max - 1] = shown[max - 1].replace(/.{0,2}$/, "") + "…";
+    ctx.fillStyle = ink; shown.forEach((l, i) => ctx.fillText(l, pad, 290 + i * g));
+    drawPills(ctx, p.tags, pad, 290 + shown.length * g + 20, W - 100, H - 250, ink, ink, `500 26px ${MONO_STACK}`);
+    drawFooter(ctx, p, W, H, 100, ink, mute);
+  },
+  // a torn scrap of paper taped onto kraft paper
+  collage(ctx, p, cover, W, H, hue) {
+    const pad = 110, ink = "#2a2a2a", mute = "#6f685a", song = p.song;
+    ctx.fillStyle = "#ddd6c8"; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.translate(W / 2, 600); ctx.rotate(-0.03);
+    const sw = W - 240, sh = 740, x0 = -sw / 2, y0 = -sh / 2;
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(x0, y0 + 14);
+    for (let x = 0; x <= sw; x += 40) ctx.lineTo(x0 + x, y0 + (x % 80 ? 0 : 16));
+    ctx.lineTo(x0 + sw, y0 + sh); ctx.lineTo(x0, y0 + sh); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(255,226,110,.75)"; ctx.fillRect(-90, y0 - 26, 180, 56);
+    const t = fitText(ctx, p.body, (s) => `600 ${s}px ${SERIF_STACK}`, sw - 100, sh - 220, 68, 30, 1.35);
+    ctx.fillStyle = ink; ctx.font = `600 ${t.size}px ${SERIF_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, x0 + 50, y0 + 70 + t.size + i * t.lh));
+    ctx.fillStyle = mute; ctx.font = `400 24px ${MONO_STACK}`; ctx.fillText(capLine(ctx, song, sw - 100), x0 + 50, y0 + sh - 40);
+    ctx.restore();
+    drawPills(ctx, p.tags, pad, 1030, W - pad, H - 330, ink, ink, `500 26px ${MONO_STACK}`);
+    drawFooter(ctx, p, W, H, pad, ink, mute);
+  },
+  // a till receipt
+  receipt(ctx, p, cover, W, H, hue) {
+    const song = p.song, ink = "#161616", mute = "#6f6f6f", rx = 150, rw = W - 300, top = 90, bottom = H - 110;
+    ctx.fillStyle = "#e6e6e0"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fffefa"; ctx.beginPath(); ctx.moveTo(rx, top); ctx.lineTo(rx + rw, top); ctx.lineTo(rx + rw, bottom);
+    for (let x = rx + rw; x > rx; x -= 40) { ctx.lineTo(x - 20, bottom + 24); ctx.lineTo(x - 40, bottom); } ctx.closePath(); ctx.fill();
+    const px = rx + 60, pw = rw - 120; ctx.textAlign = "center"; ctx.fillStyle = ink; ctx.font = `700 40px ${MONO_STACK}`; ctx.fillText("SONG EXPLAIN", W / 2, top + 100);
+    ctx.fillStyle = mute; ctx.font = `400 24px ${MONO_STACK}`; ctx.fillText(`${p.date}   No. ${feelNo(p.body)}`, W / 2, top + 148); ctx.textAlign = "left";
+    const dash = (y) => { ctx.strokeStyle = ink; ctx.lineWidth = 3; ctx.setLineDash([12, 10]); ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px + pw, y); ctx.stroke(); ctx.setLineDash([]); };
+    dash(top + 190); ctx.fillStyle = ink; ctx.font = `700 32px ${MONO_STACK}`; ctx.fillText("1 x " + capLine(ctx, song, pw - 60), px, top + 250);
+    const t = fitText(ctx, p.body, (s) => `500 ${s}px ${MONO_STACK}`, pw, bottom - top - 560, 40, 24, 1.55);
+    ctx.font = `500 ${t.size}px ${MONO_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, px, top + 320 + t.size + i * t.lh));
+    const yy = top + 320 + t.lines.length * t.lh + 40; dash(yy);
+    ctx.font = `700 30px ${MONO_STACK}`; ctx.fillText("FEELINGS: " + (p.tags.join(", ") || "-").slice(0, 34), px, yy + 56); ctx.fillText("TOTAL  1", px, yy + 106);
+    ctx.textAlign = "center"; ctx.fillStyle = mute; ctx.font = `400 24px ${MONO_STACK}`; ctx.fillText(p.author ? `*** THANK YOU, ${p.author.toUpperCase()} ***` : "*** THANK YOU ***", W / 2, bottom - 30); ctx.textAlign = "left";
+  },
+  // a postcard: message on the left, stamp and address lines on the right
+  postcard(ctx, p, cover, W, H, hue) {
+    const song = p.song, ink = "#4a2b1a", mute = "#8a6a55", pad = 90;
+    ctx.fillStyle = "#f3e3d0"; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = ink; ctx.lineWidth = 4; ctx.strokeRect(50, 50, W - 100, H - 100);
+    ctx.fillStyle = mute; ctx.font = `500 26px ${MONO_STACK}`; if ("letterSpacing" in ctx) ctx.letterSpacing = "6px"; ctx.fillText("POSTCARD", pad, 130); if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    ctx.setLineDash([10, 8]); ctx.strokeStyle = ink; ctx.lineWidth = 3; ctx.strokeRect(W - pad - 170, 90, 150, 190); ctx.setLineDash([]);
+    ctx.fillStyle = `hsl(${hue} 30% 78%)`; ctx.fillRect(W - pad - 160, 100, 130, 170);
+    const t = fitText(ctx, p.body, (s) => `600 ${s}px ${HAND_STACK}`, W - pad * 2, H - 700, 84, 34, 1.3);
+    ctx.fillStyle = ink; ctx.font = `600 ${t.size}px ${HAND_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, pad, 400 + t.size + i * t.lh));
+    drawPills(ctx, p.tags, pad, 400 + t.lines.length * t.lh + 30, W - pad, H - 330, ink, ink, `500 26px ${MONO_STACK}`);
+    ctx.strokeStyle = "rgba(74,43,26,.4)"; ctx.lineWidth = 2; for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(pad, H - 250 + i * 50); ctx.lineTo(W - pad, H - 250 + i * 50); ctx.stroke(); }
+    ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText("to: you, later  ·  re: " + capLine(ctx, song, W - pad * 2 - 260), pad, H - 262 + 0); ctx.fillText(p.author ? `from ${p.author}  ·  ${p.date}` : p.date, pad, H - 162);
+  },
+  // a magazine cover: the song as the masthead, the feeling as a cover line
+  magazine(ctx, p, cover, W, H, hue) {
+    const pad = 90, song = p.song, ink = "#fff";
+    ctx.fillStyle = `hsl(${hue} 62% 46%)`; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = ink; ctx.font = `500 26px ${MONO_STACK}`; if ("letterSpacing" in ctx) ctx.letterSpacing = "6px"; ctx.fillText("SONG EXPLAIN", pad, 110); ctx.textAlign = "right"; ctx.fillText(`No. ${feelNo(p.body)}`, W - pad, 110); ctx.textAlign = "left"; if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    ctx.fillRect(pad, 140, W - pad * 2, 6);
+    const m = fitText(ctx, String(song.title || "").toUpperCase(), (s) => `700 ${s}px ${SERIF_STACK}`, W - pad * 2, 520, 190, 70, 0.98);
+    ctx.font = `700 ${m.size}px ${SERIF_STACK}`; if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-m.size * 0.03).toFixed(1)}px`; m.lines.forEach((l, i) => ctx.fillText(l, pad, 190 + m.size * 0.9 + i * m.lh)); if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    ctx.font = `500 30px ${MONO_STACK}`; ctx.fillText(String(song.artist || "").toUpperCase(), pad, 190 + m.lines.length * m.lh + 50);
+    const t = fitText(ctx, p.body, (s) => `700 ${s}px ${SERIF_STACK}`, W - pad * 2 - 160, 380, 62, 30, 1.25);
+    const ty = H - 190 - t.lines.length * t.lh; ctx.font = `700 ${t.size}px ${SERIF_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, pad, ty + t.size + i * t.lh));
+    drawPills(ctx, p.tags, pad, H - 150, W - pad - 200, H - 100, ink, ink, `500 24px ${MONO_STACK}`);
+    let seed = Number(feelNo(p.body)); for (let x = W - pad - 170, i = 0; i < 28; i++) { seed = (seed * 9301 + 49297) % 233280; ctx.fillRect(x + i * 6, H - 150, 2 + (seed % 3), 60); }
+  },
+  // a postage stamp: perforated edge, framed picture, postmark
+  stamp(ctx, p, cover, W, H, hue) {
+    const song = p.song, ink = "#3a2a1a", mute = "#8a7658", bg = `hsl(${hue} 18% 80%)`, x0 = 110, y0 = 110, sw = W - 220, sh = H - 220;
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff8ec"; ctx.fillRect(x0, y0, sw, sh);
+    ctx.fillStyle = bg; for (let x = x0; x <= x0 + sw; x += 36) { ctx.beginPath(); ctx.arc(x, y0, 12, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(x, y0 + sh, 12, 0, Math.PI * 2); ctx.fill(); }
+    for (let y = y0; y <= y0 + sh; y += 36) { ctx.beginPath(); ctx.arc(x0, y, 12, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(x0 + sw, y, 12, 0, Math.PI * 2); ctx.fill(); }
+    ctx.strokeStyle = ink; ctx.lineWidth = 5; ctx.strokeRect(x0 + 40, y0 + 40, sw - 80, sh - 80);
+    ctx.fillStyle = ink; ctx.font = `500 24px ${MONO_STACK}`; ctx.fillText("SONG EXPLAIN", x0 + 70, y0 + 100); ctx.textAlign = "right"; ctx.fillText(`No. ${feelNo(p.body)}`, x0 + sw - 70, y0 + 100); ctx.textAlign = "left";
+    const ps = 330; drawCover(ctx, x0 + 70, y0 + 130, ps, song, cover, hue, 4);
+    ctx.font = `700 46px ${SERIF_STACK}`; const tl = wrapLines(ctx, song.title || "", sw - 140 - ps - 30).slice(0, 3); tl.forEach((l, i) => ctx.fillText(l, x0 + 70 + ps + 30, y0 + 190 + i * 54));
+    ctx.fillStyle = mute; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(wrapLines(ctx, song.artist || "", sw - 140 - ps - 30)[0] || "", x0 + 70 + ps + 30, y0 + 200 + tl.length * 54);
+    const t = fitText(ctx, p.body, (s) => `600 ${s}px ${SERIF_STACK}`, sw - 140, sh - 560, 52, 26, 1.35);
+    ctx.fillStyle = ink; ctx.font = `600 ${t.size}px ${SERIF_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, x0 + 70, y0 + 540 + t.size + i * t.lh));
+    drawPills(ctx, p.tags, x0 + 70, y0 + 540 + t.lines.length * t.lh + 24, x0 + sw - 70, y0 + sh - 150, ink, ink, `500 24px ${MONO_STACK}`);
+    ctx.fillStyle = mute; ctx.font = `400 24px ${MONO_STACK}`; ctx.fillText(p.author ? `— ${p.author}  ·  ${p.date}` : p.date, x0 + 70, y0 + sh - 70);
+    ctx.save(); ctx.translate(x0 + sw - 160, y0 + sh - 160); ctx.rotate(-0.25); ctx.strokeStyle = "rgba(58,42,26,.5)"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, 76, 0, Math.PI * 2); ctx.stroke(); for (let i = -50; i <= 50; i += 20) { ctx.beginPath(); ctx.moveTo(-62, i); ctx.lineTo(62, i); ctx.stroke(); } ctx.restore();
+  },
+});
 async function feelingImage(p) {
   const W = 1080, H = 1350, song = p.song || {}, d = designOf(p.design), hue = feelHue(song);
   await loadCardFonts(`${song.title}${song.artist}${p.body}${p.tags.join("")}${p.author}Song Explain.`);
-  if (d === "sticky" || d === "polaroid") { try { await document.fonts.load('600 60px "Caveat"', p.body + p.tags.join("")); } catch {} }
+  if (["sticky", "polaroid", "notebook", "postcard"].includes(d)) { try { await document.fonts.load('600 60px "Caveat"', p.body + p.tags.join("")); } catch {} }
   let cover = null;
   if (song.cover) { try { const r = await rawApi("GET", `/api/cover?u=${encodeURIComponent(song.cover)}`); if (r.ok) cover = await createImageBitmap(await r.blob()); } catch {} }
   const c = document.createElement("canvas"); c.width = W; c.height = H;
@@ -2023,7 +2165,7 @@ async function explain(song) {
 }
 
 /* ---------- Lyric card ---------- */
-const CARD = { song: null, lines: [], picked: [], mode: "lyrics", theme: "paper", format: "story", own: "", cover: null, tint: null, lyricsLoaded: false, seq: 0 };
+const CARD = { song: null, lines: [], picked: [], mode: "lyrics", theme: "paper", design: "classic", format: "story", own: "", cover: null, tint: null, lyricsLoaded: false, seq: 0 };
 const CARD_MAX_LINES = 4, CARD_MAX_CHARS = 220;
 const SERIF_STACK = '"Space Grotesk","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
 const MONO_STACK = '"DM Mono","Noto Sans SC","PingFang SC","Microsoft YaHei",ui-monospace,Consolas,monospace';
@@ -2037,8 +2179,9 @@ function bindSeg(id, key) {
 
 async function openCard(song) {
   Object.assign(CARD, { song, lines: [], picked: [], own: "", cover: null, tint: null, lyricsLoaded: false });
-  setSeg("cmode", CARD.mode); setSeg("ctheme", CARD.theme); setSeg("cfmt", CARD.format);
-  bindSeg("cmode", "mode"); bindSeg("ctheme", "theme"); bindSeg("cfmt", "format");
+  $("cdesign").innerHTML = LYRIC_DESIGNS.map(([id, label]) => `<button data-v="${id}" aria-pressed="false">${label}</button>`).join("");
+  setSeg("cmode", CARD.mode); setSeg("cdesign", CARD.design); setSeg("ctheme", CARD.theme); setSeg("cfmt", CARD.format);
+  bindSeg("cmode", "mode"); bindSeg("cdesign", "design"); bindSeg("ctheme", "theme"); bindSeg("cfmt", "format");
   $("cshare").hidden = !(navigator.canShare && navigator.canShare({ files: [new File([""], "x.png", { type: "image/png" })] }));
   $("carddlg").showModal();
   renderCardPicker(); drawCard();
@@ -2167,6 +2310,63 @@ async function loadCardFonts(text) {
   } catch {}
 }
 
+/* ---------- lyric card designs: the same hand-built looks as the feeling cards, filled with the lines you chose ---------- */
+// Each design is drawn at 1080 × 1350 and then placed on the card (centred, on its own background colour), so every
+// design works in both sizes — Story 9:16 and Square 1:1.
+Object.assign(DRAW, {
+  // a film still: the cover, darkened, with the line as a subtitle
+  subtitle(ctx, p, cover, W, H, hue) {
+    const song = p.song;
+    ctx.fillStyle = `hsl(${hue} 22% 16%)`; ctx.fillRect(0, 0, W, H);
+    if (cover) { const s = Math.max(W / cover.width, H / cover.height) * 1.05; ctx.drawImage(cover, (W - cover.width * s) / 2, (H - cover.height * s) / 2, cover.width * s, cover.height * s); }
+    ctx.fillStyle = "rgba(0,0,0,.42)"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, 170); ctx.fillRect(0, H - 170, W, 170);
+    const t = fitText(ctx, p.body, (s) => `500 ${s}px ${SERIF_STACK}`, W - 200, 330, 62, 30, 1.3);
+    const top = H - 170 - 60 - t.lines.length * t.lh;
+    ctx.textAlign = "center"; ctx.font = `500 ${t.size}px ${SERIF_STACK}`;
+    t.lines.forEach((l, i) => { const y = top + t.size + i * t.lh, w = ctx.measureText(l).width; ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(W / 2 - w / 2 - 18, y - t.size * 0.95, w + 36, t.size * 1.3); ctx.fillStyle = "#fff"; ctx.fillText(l, W / 2, y); });
+    ctx.fillStyle = "#cfcfcf"; ctx.font = `400 26px ${MONO_STACK}`; ctx.fillText(capLine(ctx, song, W - 200).toUpperCase(), W / 2, H - 86); ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.font = `500 24px ${MONO_STACK}`; ctx.fillText("SONG EXPLAIN", 60, 100);
+  },
+  // a typed page
+  typewriter(ctx, p, cover, W, H, hue) {
+    const pad = 130, ink = "#1d1b17", mute = "#8a857a", song = p.song;
+    ctx.fillStyle = "#f7f5ef"; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(0,0,0,.06)"; ctx.lineWidth = 2; for (let y = 230; y < H - 120; y += 70) { ctx.beginPath(); ctx.moveTo(60, y); ctx.lineTo(W - 60, y); ctx.stroke(); }
+    ctx.fillStyle = mute; ctx.font = `400 28px ${MONO_STACK}`; ctx.fillText("Dear listener,", pad, 190);
+    const t = fitText(ctx, p.body, (s) => `500 ${s}px ${MONO_STACK}`, W - pad * 2, H - 520, 56, 28, 1.6);
+    ctx.fillStyle = ink; ctx.font = `500 ${t.size}px ${MONO_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, pad, 290 + t.size + i * t.lh));
+    const cy = 290 + t.size + (t.lines.length - 1) * t.lh; ctx.fillRect(pad + ctx.measureText(t.lines[t.lines.length - 1]).width + 6, cy - t.size * 0.8, 4, t.size * 0.95);
+    ctx.fillStyle = mute; ctx.font = `400 28px ${MONO_STACK}`; ctx.fillText("— " + capLine(ctx, song, W - pad * 2 - 40), pad, H - 200);
+    ctx.fillStyle = ink; ctx.font = `700 34px ${SERIF_STACK}`; ctx.textAlign = "right"; ctx.fillText("Song Explain.", W - pad, H - 120); ctx.textAlign = "left";
+  },
+  // a newspaper clipping with the line as the headline
+  newspaper(ctx, p, cover, W, H, hue) {
+    const pad = 100, ink = "#1a1a1a", mute = "#6c6552", song = p.song;
+    ctx.fillStyle = "#eadfc8"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = ink; ctx.font = `700 78px ${SERIF_STACK}`; ctx.textAlign = "center"; ctx.fillText("THE DAILY SONG", W / 2, 190); ctx.textAlign = "left";
+    ctx.fillRect(pad, 130 - 40, W - pad * 2, 4); ctx.fillRect(pad, 230, W - pad * 2, 4); ctx.fillRect(pad, 242, W - pad * 2, 2);
+    ctx.fillStyle = mute; ctx.font = `400 24px ${MONO_STACK}`; ctx.fillText((song.year ? "VOL. " + song.year : "SPECIAL EDITION"), pad, 290); ctx.textAlign = "right"; ctx.fillText("PRICE: ONE LISTEN", W - pad, 290); ctx.textAlign = "left";
+    const t = fitText(ctx, "“" + p.body.replace(/\n/g, " ") + "”", (s) => `700 ${s}px ${SERIF_STACK}`, W - pad * 2, 540, 84, 36, 1.2);
+    ctx.fillStyle = ink; ctx.font = `700 ${t.size}px ${SERIF_STACK}`; t.lines.forEach((l, i) => ctx.fillText(l, pad, 360 + t.size + i * t.lh));
+    const by = 360 + t.lines.length * t.lh + 50; ctx.fillRect(pad, by, W - pad * 2, 3);
+    ctx.font = `500 28px ${MONO_STACK}`; ctx.fillStyle = mute; ctx.fillText("by " + capLine(ctx, song, W - pad * 2 - 80), pad, by + 56);
+    const cw = (W - pad * 2 - 60) / 2; ctx.fillStyle = "rgba(0,0,0,.14)"; for (let c = 0; c < 2; c++) for (let y = by + 100; y < H - 220; y += 30) ctx.fillRect(pad + c * (cw + 60), y, cw * (0.7 + ((y * 7 + c * 13) % 30) / 100), 10);
+    ctx.fillStyle = ink; ctx.font = `700 34px ${SERIF_STACK}`; ctx.textAlign = "right"; ctx.fillText("Song Explain.", W - pad, H - 90); ctx.textAlign = "left";
+  },
+});
+const LYRIC_DESIGNS = [["classic", "Classic"], ["vinyl", "Vinyl"], ["cassette", "Cassette"], ["polaroid", "Polaroid"], ["subtitle", "Film subtitle"], ["typewriter", "Typewriter"], ["newspaper", "Newspaper"], ["poster", "Poster"], ["stamp", "Stamp"]];
+// Draws one of the designs onto the lyric card canvas, whatever its size.
+function drawLyricDesign(ctx, W, H, p, cover, hue) {
+  const off = document.createElement("canvas"); off.width = 1080; off.height = 1350;
+  const o = off.getContext("2d"); o.textBaseline = "alphabetic"; o.textAlign = "left";
+  DRAW[CARD.design](o, p, cover, 1080, 1350, hue);
+  const px = o.getImageData(3, 3, 1, 1).data; // the design's own background colour fills whatever the size leaves over
+  ctx.fillStyle = `rgb(${px[0]},${px[1]},${px[2]})`; ctx.fillRect(0, 0, W, H);
+  const s = Math.min(W / 1080, H / 1350), w = 1080 * s, h = 1350 * s;
+  ctx.drawImage(off, (W - w) / 2, (H - h) / 2, w, h);
+}
+
 async function drawCard() {
   const seq = ++CARD.seq;
   const song = CARD.song;
@@ -2174,6 +2374,16 @@ async function drawCard() {
   const quote = CARD.mode === "own" ? CARD.own.trim() : CARD.picked.map((i) => CARD.lines[i]).join("\n");
   await loadCardFonts(`${song.title}${song.artist}${quote}Song Explain.`);
   if (seq !== CARD.seq) return; // a newer draw superseded this one
+  $("cthemef").hidden = CARD.design !== "classic"; // the paper / ink / cover-colour choice belongs to the classic design only
+  if (CARD.design !== "classic") {
+    if (["polaroid"].includes(CARD.design)) { try { await document.fonts.load('600 60px "Caveat"', quote); } catch {} }
+    if (seq !== CARD.seq) return;
+    const c2 = $("cardcv"), W2 = 1080, H2 = CARD.format === "story" ? 1920 : 1080;
+    c2.width = W2; c2.height = H2;
+    const placeholder = CARD.mode === "own" ? "Write the words you want to share." : "Choose the lines you love.";
+    drawLyricDesign(c2.getContext("2d"), W2, H2, { body: quote || placeholder, tags: [], author: "", date: song.year || "", song }, CARD.cover, feelHue(song));
+    return;
+  }
 
   const c = $("cardcv"), W = 1080, H = CARD.format === "story" ? 1920 : 1080, story = CARD.format === "story";
   c.width = W; c.height = H;

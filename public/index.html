@@ -331,8 +331,6 @@
   .article.partial { opacity:.7; margin-top:22px }
   /* more card designs */
   .dz-film { --sw:#161616 } .dz-vinyl { --sw:#f4f0e6 } .dz-cassette { --sw:#e7d9b8 } .dz-notebook { --sw:#e3eef7 } .dz-collage { --sw:#ddd6c8 } .dz-receipt { --sw:#fffefa } .dz-postcard { --sw:#f3e3d0 } .dz-magazine { --sw:#d94f30 } .dz-stamp { --sw:#fff8ec }
-  /* fifteen styles in one scrolling row instead of a tall block of chips */
-  .designs { flex-wrap:nowrap; overflow-x:auto; padding-bottom:10px; scrollbar-width:thin; scroll-snap-type:x proximity } .dz { flex:none; scroll-snap-align:start }
   /* Film strip: dark frame, sprocket holes top and bottom */
   .entry.d-film { --paper:#161616; --ink:#f2efe6; --muted:#a8a396; --hair:rgba(242,239,230,.25); --rule:#f2efe6; border:0; border-radius:3px; padding:38px 24px 36px; box-shadow:0 14px 26px -18px rgba(0,0,0,.7) }
   .entry.d-film .e-bar, .entry.d-film .e-song { display:none }
@@ -400,6 +398,13 @@
   .entry.d-stamp .e-cap { display:block; font:700 1rem var(--display) } .entry.d-stamp .e-cap a { text-decoration:none }
   .entry.d-stamp .e-body { padding-top:8px; font:600 .98rem/1.6 var(--body) } .entry.d-stamp .e-tags, .entry.d-stamp .e-foot { clear:both }
   .entry.d-stamp .e-deco { display:block; position:absolute; right:26px; bottom:60px; width:74px; height:74px; border:2px solid rgba(58,42,26,.5); border-radius:50%; transform:rotate(-16deg); background:repeating-linear-gradient(0deg,transparent 0 10px,rgba(58,42,26,.45) 10px 12px); pointer-events:none }
+  /* card style: a closed picker that shows the style in use, opening into a grid of tiles (no sideways scrolling) */
+  .dzpick > summary { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 14px; border:1px solid var(--rule); cursor:pointer; list-style:none } .dzpick > summary::-webkit-details-marker { display:none }
+  .dzpick > summary b { font:500 .85rem var(--mono) } .dzpick > summary .mono { margin-left:auto; color:var(--muted) } .dzpick > summary::after { content:"▾"; font-size:.8rem } .dzpick[open] > summary::after { content:"▴" }
+  .dzsw { display:inline-block; width:24px; height:24px; border-radius:3px; border:1px solid rgba(0,0,0,.2); background:var(--sw) }
+  .dzpick .designs { display:grid; grid-template-columns:repeat(auto-fill,minmax(118px,1fr)); gap:8px; margin-top:10px; padding:0; overflow:visible }
+  .dzpick .dz { flex-direction:column; align-items:stretch; gap:6px; padding:6px 6px 8px; text-align:left } .dzpick .dz[aria-pressed=true] { padding:5px 5px 7px }
+  .dzpick .dz i { width:100%; height:42px; border-radius:2px } .dzpick .dz span { font:400 .72rem var(--mono) }
   .libfilter { display:flex; gap:14px; align-items:center; max-width:420px; margin:0 0 30px } .libfilter input { flex:1; min-width:0 }
   .mood:hover { color:var(--ink) } .mood[aria-pressed=true] { color:var(--ink); border-bottom-color:var(--rule) }
   /* a feeling is a small memory card: song on top, the words as a quote, feeling words as pills, small print below */

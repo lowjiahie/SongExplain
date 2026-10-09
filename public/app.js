@@ -1505,6 +1505,8 @@ async function saveFeelingImage(fid) {
 function setDesign(id) {
   $("pdesign").value = designOf(id) === "paper" ? "" : designOf(id);
   document.querySelectorAll("#designs [data-design]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.design === designOf(id))));
+  const cur = DESIGNS.find((d) => d.id === designOf(id));
+  if ($("dzname")) { $("dzname").textContent = cur.label; $("dzcur").className = "dzsw dz-" + cur.id; } // the closed picker shows the style in use
   renderPreview();
 }
 // Shows how long the writing is. Shared feelings are limited to 1500 characters, so say so before saving fails.
@@ -1623,7 +1625,8 @@ async function renderSong(id) {
       <div class="prompts"><span class="mono">Not sure where to start?</span>${PROMPTS.map((t) => `<button type="button" class="link" data-prompt="${esc(t)}">${esc(t)}</button>`).join("")}</div>
       <input type="hidden" id="pdesign">
       <div class="designs-wrap"><span class="mono">Card style</span>
-        <div class="designs" id="designs" role="group" aria-label="Card style">${DESIGNS.map((d) => `<button type="button" data-design="${d.id}" class="dz dz-${d.id}" aria-pressed="${d.id === "paper"}" title="${d.label}"><i></i><span>${d.label}</span></button>`).join("")}</div></div>
+        <details class="dzpick" id="dzpick"><summary><i class="dzsw dz-paper" id="dzcur"></i><b id="dzname">Editorial</b><span class="mono">${DESIGNS.length} designs · tap to choose</span></summary>
+          <div class="designs" id="designs" role="group" aria-label="Card style">${DESIGNS.map((d) => `<button type="button" data-design="${d.id}" class="dz dz-${d.id}" aria-pressed="${d.id === "paper"}" title="${d.label}"><i></i><span>${d.label}</span></button>`).join("")}</div></details></div>
       <div class="preview-wrap"><span class="mono">Preview</span><div id="fpreview"></div></div>
       <label class="check"><input type="checkbox" id="ppublic"><span><b>Share this with the other people on this app</b>, under your display name. Don't include personal details. No links, and please don't paste lyrics. You can make it private again any time.</span></label>
       <div class="row" style="margin-top:14px"><button class="btn" id="padd">Save my feeling</button><button class="btn ghost" id="pcancel" hidden>Cancel</button><span id="pstat" class="note" style="margin:0"></span></div>
@@ -1664,7 +1667,7 @@ async function renderSong(id) {
   setMood("");
   setDesign("paper");
   loadTagPool();
-  $("designs").onclick = (e) => { const b = e.target.closest("[data-design]"); if (b) setDesign(b.dataset.design); };
+  $("designs").onclick = (e) => { const b = e.target.closest("[data-design]"); if (b) { setDesign(b.dataset.design); $("dzpick").open = false; } };
   ["pbody", "panchor"].forEach((x) => ($(x).oninput = renderPreview));
   $("ppublic").onchange = renderPreview;
   $("pbody").addEventListener("input", () => updateCount());

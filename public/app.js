@@ -559,6 +559,14 @@ document.addEventListener("click", async (e) => {
       a.play().catch(() => { stopPreview(); toast("The preview could not be played.", "err"); });
     }
     else if (act === "lyredit") showLyrEdit(true);
+    else if (act === "exretry") explain(curSong);
+    else if (act === "exkeep" && INTERRUPTED) {
+      await json("POST", `/api/songs/${INTERRUPTED.song.id}/explanations`, { body: INTERRUPTED.partial, language: INTERRUPTED.language });
+      toast("Kept — marked as cut off"); INTERRUPTED = null; LIVE.html = ""; renderSong(curSong.id);
+    }
+    else if (act === "lyrother") await openLyricChoices();
+    else if (act === "lyrpick") await pickLyricChoice(Number(el.dataset.i));
+    else if (act === "lyrclosepick") $("lyrcands").hidden = true;
     else if (act === "lyrsync") {
       if (!curSong.lyrics_auto && !confirm("Sync looks the lyrics up online again and REPLACES the ones saved here — including anything you pasted or edited yourself.\n\nContinue?")) return;
       el.disabled = true; el.textContent = "Syncing…";
@@ -725,6 +733,31 @@ function applyLyrSize() {
   const v = lyrSize(), view = $("lyrview");
   if (view) view.style.setProperty("--lyr", LYR_SIZES[v]);
   document.querySelectorAll("#lyrtools [data-act=lyrsize]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.v) === v)));
+}
+// Choosing between versions: each card shows where it came from, whose song it is credited to, and the first two lines.
+let LYR_CHOICES = [];
+async function openLyricChoices() {
+  const box = $("lyrcands");
+  box.hidden = false;
+  box.innerHTML = `<p class="note" style="margin:0">Looking in several places for other versions…</p>`;
+  try {
+    const d = await json("POST", `/api/songs/${curSong.id}/lyrics/candidates`, {});
+    LYR_CHOICES = d.candidates;
+    if (!LYR_CHOICES.length) { box.innerHTML = `<p class="note" style="margin:0">No other version was found online. You can paste the right lyrics yourself with “Edit”.</p><div class="row" style="margin-top:12px"><button class="link" data-act="lyrclosepick" type="button">Close</button></div>`; return; }
+    box.innerHTML = `<div class="lyr-cands-head"><b>Choose the right lyrics</b><span class="mono">${LYR_CHOICES.length} version${LYR_CHOICES.length > 1 ? "s" : ""} found · check the first lines against the song</span><button class="link" data-act="lyrclosepick" type="button">Close</button></div>` +
+      LYR_CHOICES.map((c) => `<article class="lyr-cand${c.current ? " current" : ""}"><div class="lyr-cand-top"><span class="lyr-cand-src">${esc(c.source)}</span><b>${esc(c.title || curSong.title)}</b><span class="mono">${esc(c.artist || "artist unknown")}${c.album ? " · " + esc(c.album) : ""}${c.artistMatch ? " · ✓ same artist" : ""}</span></div>
+        <p class="lyr-cand-prev">${c.preview.map((l) => esc(l)).join("<br>")}…</p>
+        <div class="lyr-cand-foot"><span class="mono">${c.lines} lines</span>${c.current ? `<span class="badge shared">Currently saved</span>` : `<button class="btn ghost sm" data-act="lyrpick" data-i="${c.id}" type="button">Use this one</button>`}</div></article>`).join("") +
+      `<p class="note" style="margin:12px 0 0">None of these right? Close this and use “Edit” to paste the correct lyrics.</p>`;
+  } catch (e) { box.innerHTML = `<p class="note err" style="margin:0">${esc(e.message)}</p><div class="row" style="margin-top:12px"><button class="link" data-act="lyrclosepick" type="button">Close</button></div>`; }
+}
+async function pickLyricChoice(i) {
+  const c = LYR_CHOICES.find((x) => x.id === i);
+  if (!c) return;
+  if (LYR.text.trim() && !curSong.lyrics_auto && !confirm("This replaces the lyrics saved here — including anything you pasted or edited yourself.\n\nContinue?")) return;
+  await json("PUT", `/api/songs/${curSong.id}/lyrics`, { lyrics: c.text, auto: true });
+  toast(`Lyrics changed to the ${c.source} version`);
+  renderSong(curSong.id);
 }
 function showLyrEdit(on) {
   $("lyrread").hidden = on; $("lyredit").hidden = !on;
@@ -1463,8 +1496,9 @@ async function renderSong(id) {
           <span class="mono">Text size</span>
           <span class="lyr-sz">${["S", "M", "L"].map((l, i) => `<button type="button" data-act="lyrsize" data-v="${i}" aria-pressed="false" aria-label="Text size ${l}">${l}</button>`).join("")}</span>
           <span class="mono" id="lyrcount"></span>
-          <span class="push"><button class="link" data-act="lyrsync" type="button" title="Look the lyrics up online again and replace what is saved here">Sync lyrics</button><button class="link" data-act="lyrcopy" type="button">Copy</button><button class="link" data-act="lyredit" type="button">Edit</button></span>
+          <span class="push"><button class="link" data-act="lyrother" type="button" title="These lyrics are wrong? See what other sources have and choose">Wrong lyrics? Try others</button><button class="link" data-act="lyrcopy" type="button">Copy</button><button class="link" data-act="lyredit" type="button">Edit</button></span>
         </div>
+        <div id="lyrcands" class="lyr-cands" hidden></div>
         <article class="lyr-view" id="lyrview" hidden></article>
         <div class="lyr-empty" id="lyrempty" hidden>
           <p class="lyr-empty-t">No lyrics saved for this song yet</p>
@@ -1529,10 +1563,23 @@ async function renderSong(id) {
   const exCard = (e) => `
     <article class="article"><div class="meta"><span>${esc(e.language)}</span><span>${esc(e.model || e.provider || "")}</span><span>${esc(fmtDate(e.created_at))}</span>
       <button class="link danger push" data-delex="${e.id}">delete</button></div><div class="prose">${md(e.body)}</div></article>`;
-  $("exlist").innerHTML = explanations.length
-    ? exCard(explanations[0]) + (explanations.length > 1 ? `<details style="margin-top:40px"><summary class="note" style="cursor:pointer">Earlier explanations (${explanations.length - 1})</summary>${explanations.slice(1).map(exCard).join("")}</details>` : "")
-    : `<div class="empty" style="margin-top:30px"><p>No explanation yet.</p><p class="mono">Choose a language and press “Explain this song”. It finds the lyrics, reads what listeners say, then writes it up.</p></div>`;
-  document.querySelectorAll("[data-delex]").forEach((b) => (b.onclick = async () => { await json("DELETE", "/api/explanations/" + b.dataset.delex); renderSong(id); }));
+  let saved = explanations.slice();
+  const drawSaved = () => {
+    const open = document.querySelector("#exlist details")?.open; // keep "Earlier explanations" open if it was
+    $("exlist").innerHTML = saved.length
+      ? exCard(saved[0]) + (saved.length > 1 ? `<details style="margin-top:40px"${open ? " open" : ""}><summary class="note" style="cursor:pointer">Earlier explanations (${saved.length - 1})</summary>${saved.slice(1).map(exCard).join("")}</details>` : "")
+      : ctrl ? "" : `<div class="empty" style="margin-top:30px"><p>No explanation yet.</p><p class="mono">Choose a language and press “Explain this song”. It finds the lyrics, reads what listeners say, then writes it up.</p></div>`;
+    const tab = document.querySelector('.tab[data-tab="explain"]');
+    if (tab) tab.textContent = `Explanation${saved.length ? ` (${saved.length})` : ""}`;
+    document.querySelectorAll("[data-delex]").forEach((b) => (b.onclick = async () => {
+      await json("DELETE", "/api/explanations/" + b.dataset.delex);
+      saved = saved.filter((x) => String(x.id) !== b.dataset.delex);
+      drawSaved(); // only the list changes: an explanation that is being written right now stays exactly as it is
+    }));
+  };
+  drawSaved();
+  // if an explanation is being written for this song while the page is rebuilt, put the live block and the Stop button back
+  if (ctrl && LIVE.songId === id) { $("live").innerHTML = LIVE.html; const b = $("explain"); if (b) { b.textContent = "Stop"; b.classList.add("stop"); } $("exstat").textContent = LIVE.stat; }
 
   // perspectives
   $("plist").innerHTML = perspectives.length ? `<span class="lab plist-head">Your feelings about this song</span>` : `<div class="empty" style="margin-top:34px"><p>Nothing here yet.</p><p class="mono">Write the first thing this song makes you feel — only you will see it.</p></div>`;
@@ -1911,6 +1958,18 @@ async function summarizeViews(song) {
 
 /* ---------- Explain ---------- */
 let ctrl = null; // current explain request, so it can be stopped
+const LIVE = { songId: null, html: "", stat: "" }; // what the live block currently shows, so a page rebuild can't lose it
+const setLive = (songId, html, stat) => { LIVE.songId = songId; LIVE.html = html; LIVE.stat = stat ?? LIVE.stat; if ($("live")) $("live").innerHTML = html; if (stat != null && $("exstat")) $("exstat").textContent = stat; };
+// The answer stopped half-way: tell the person what happened, show what did arrive, and offer the next step.
+let INTERRUPTED = null;
+function showInterrupted(song, partial, reason) {
+  INTERRUPTED = { song, partial, language: curLang };
+  const html = `<div class="interrupted" role="alert"><b>The explanation stopped before it was finished</b>
+      <p>${esc(reason)}</p>
+      <p class="mono">${partial ? "What was written so far is shown below. It has not been saved." : "Nothing was written."}</p>
+      <div class="row"><button class="btn" data-act="exretry" type="button">Try again</button>${partial ? `<button class="btn ghost" data-act="exkeep" type="button">Keep what was written</button>` : ""}</div></div>${partial ? `<article class="article partial"><div class="prose">${md(partial)}</div></article>` : ""}`;
+  setLive(song.id, html, "");
+}
 async function explain(song) {
   if (ctrl) { ctrl.abort(); return; } // button acts as Stop while running
   if (!hasAI()) { toast("Connect an AI model first.", "err"); openSettings(true); return; }
@@ -1918,7 +1977,7 @@ async function explain(song) {
   const btn = $("explain");
   btn.textContent = "Stop"; btn.classList.add("stop");
   $("exstat").className = "note"; $("exstat").textContent = "Finding the lyrics and what listeners say…";
-  $("live").innerHTML = `<div class="article"><div class="sk" style="height:26px;width:60%;margin-bottom:22px"></div><div class="sk" style="height:12px;margin:12px 0"></div><div class="sk" style="height:12px;width:92%;margin:12px 0"></div><div class="sk" style="height:12px;width:76%;margin:12px 0"></div></div>`;
+  setLive(song.id, `<div class="article"><div class="sk" style="height:26px;width:60%;margin-bottom:22px"></div><div class="sk" style="height:12px;margin:12px 0"></div><div class="sk" style="height:12px;width:92%;margin:12px 0"></div><div class="sk" style="height:12px;width:76%;margin:12px 0"></div></div>`, "Finding the lyrics and what listeners say…");
   let text = "";
   try {
     const r = await api("POST", `/api/songs/${song.id}/explain`, { language: curLang }, mine.signal);
@@ -1928,17 +1987,20 @@ async function explain(song) {
       const { done, value } = await reader.read();
       if (done) break;
       text += dec.decode(value, { stream: true });
-      $("exstat").textContent = "Writing…";
-      $("live").innerHTML = `<article class="article"><div class="prose caret">${md(text)}</div></article>`;
+      setLive(song.id, `<article class="article"><div class="prose caret">${md(text)}</div></article>`, "Writing…");
     }
     ctrl = null;
-    if (!/\[Error: /.test(text)) return renderSong(song.id); // reload: shows the saved copy
-    $("exstat").textContent = "";
+    const cut = text.match(/\n*\[Error: ([\s\S]*)\]\s*$/);
+    if (!cut) return renderSong(song.id); // reload: shows the saved copy
+    showInterrupted(song, text.slice(0, cut.index).trim(), cut[1]);
   } catch (e) {
     if (e.name === "AbortError") {
       // partial text is discarded and not saved (the page may already have changed if the user navigated away)
       if ($("live")) $("live").innerHTML = "";
       if ($("exstat")) $("exstat").textContent = "Stopped — nothing was saved.";
+    } else if (text.trim()) {
+      // the connection broke while the answer was arriving: keep what arrived and say what happened
+      showInterrupted(song, text.replace(/\n*\[Error: [\s\S]*$/, "").trim(), /network|fetch|connection|terminated|load failed/i.test(String(e.message)) ? "The connection was lost while the answer was being written. Check your internet and try again." : e.message);
     } else {
       if ($("live")) $("live").innerHTML = "";
       if ($("exstat")) $("exstat").textContent = "";

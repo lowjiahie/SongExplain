@@ -318,6 +318,17 @@
   .listen-pop a b { margin-left:auto; font-weight:400; opacity:.6 } .listen-pop a i { width:7px; height:7px; background:currentColor; border-radius:50% } .listen-pop a em { width:7px }
   .listen-pop small { display:block; padding:9px 16px; color:var(--muted); font:400 .66rem/1.5 var(--mono); border-top:1px solid var(--hair) }
   .listen-prev { padding:10px 14px; background:transparent; color:var(--ink); border:1px solid var(--rule); font:500 .75rem var(--mono); cursor:pointer } .listen-prev:hover, .listen-prev[aria-pressed=true] { background:var(--ink); color:var(--bg) }
+  /* choosing between lyric versions */
+  .lyr-cands { margin:0 0 34px; padding:18px 20px; border:1px solid var(--rule) }
+  .lyr-cands-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px; margin-bottom:6px } .lyr-cands-head b { font:700 1.05rem var(--display) } .lyr-cands-head .mono { color:var(--muted) } .lyr-cands-head .link { margin-left:auto }
+  .lyr-cand { padding:16px 0; border-top:1px solid var(--hair) } .lyr-cand.current { opacity:.85 }
+  .lyr-cand-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px } .lyr-cand-top .mono { color:var(--muted) }
+  .lyr-cand-src { padding:1px 8px; border:1px solid var(--ink); font:500 .66rem var(--mono); letter-spacing:.06em; text-transform:uppercase }
+  .lyr-cand-prev { margin:10px 0; padding-left:14px; border-left:2px solid var(--hair); font:400 .98rem/1.7 var(--body); overflow-wrap:anywhere }
+  .lyr-cand-foot { display:flex; align-items:center; gap:14px } .lyr-cand-foot .mono { color:var(--muted) }
+  /* an explanation that stopped half-way */
+  .interrupted { margin:30px 0 0; padding:18px 20px; border:1px solid var(--danger); border-left-width:6px } .interrupted b { display:block; font:700 1.1rem var(--display); color:var(--danger) } .interrupted p { margin:8px 0 0 } .interrupted .row { margin-top:14px }
+  .article.partial { opacity:.7; margin-top:22px }
   .libfilter { display:flex; gap:14px; align-items:center; max-width:420px; margin:0 0 30px } .libfilter input { flex:1; min-width:0 }
   .mood:hover { color:var(--ink) } .mood[aria-pressed=true] { color:var(--ink); border-bottom-color:var(--rule) }
   /* a feeling is a small memory card: song on top, the words as a quote, feeling words as pills, small print below */

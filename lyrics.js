@@ -155,3 +155,56 @@ async function findLyrics(artist, title) {
 }
 
 export { fromLrclib, fromNetease, fromLyricsOvh, fromKugou }; // exported so each source can be measured on its own
+
+/* ---------- "Try other versions": every different lyric text the sources can offer for this song ---------- */
+// fetchLyrics() returns the FIRST usable text, so when that one is the wrong song's lyrics, asking again gives the same
+// answer. This gathers what each source has, side by side, so the person can choose the right one.
+const firstLines = (text, n = 2) => String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, n);
+export async function lyricCandidates(artist, title, { max = 10 } = {}) {
+  const t = stripNoise(title), a = stripNoise(artist);
+  const out = [];
+  const add = (source, meta, text) => { if (usable(text)) out.push({ source, title: meta.title || "", artist: meta.artist || "", album: meta.album || "", artistMatch: !!meta.artist && looseEq(meta.artist, a), text: String(text).trim() }); };
+
+  const lrclib = async () => {
+    const seen = new Set();
+    for (const [tt, aa] of uniq([[t, a], [toSimplified(t), toSimplified(a)]].map((p) => p.join("\u0000"))).map((p) => p.split("\u0000"))) {
+      for (const url of [`https://lrclib.net/api/search?track_name=${enc(tt)}&artist_name=${enc(aa)}`, `https://lrclib.net/api/search?q=${enc(`${tt} ${aa}`)}`, `https://lrclib.net/api/search?track_name=${enc(tt)}`]) {
+        for (const r of (await getJson(url)) || []) {
+          if (seen.has(r.id) || !looseEq(r.trackName, t)) continue;
+          seen.add(r.id); add("LRCLIB", { title: r.trackName, artist: r.artistName, album: r.albumName }, r.plainLyrics);
+        }
+      }
+    }
+  };
+  const netease = async () => {
+    const s = await getJson(`https://music.163.com/api/search/get?s=${enc(`${toSimplified(t)} ${toSimplified(a)}`)}&type=1&limit=10`, NETEASE_HEADERS);
+    const songs = (s?.result?.songs || []).filter((x) => looseEq(x.name, t)).slice(0, 4);
+    await Promise.all(songs.map(async (x) => {
+      const l = await getJson(`https://music.163.com/api/song/lyric?id=${x.id}&lv=1`, NETEASE_HEADERS);
+      add("NetEase", { title: x.name, artist: (x.artists || []).map((r) => r.name).join(", "), album: x.album?.name }, cleanLrc(l?.lrc?.lyric || ""));
+    }));
+  };
+  const kugou = async () => {
+    const s = await getJson(`https://mobileservice.kugou.com/api/v3/search/song?format=json&keyword=${enc(`${toSimplified(t)} ${toSimplified(a)}`)}&page=1&pagesize=10`);
+    const songs = (s?.data?.info || []).filter((x) => looseEq(x.songname, t) && !DERIVATIVE_TITLE.test(x.songname) && x.hash).slice(0, 3);
+    await Promise.all(songs.map(async (x) => {
+      const c = await getJson(`https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${enc(x.songname)}&hash=${x.hash}&duration=${(x.duration || 0) * 1000}`);
+      const cand = (c?.candidates || [])[0];
+      if (!cand) return;
+      const d = await getJson(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${cand.accesskey}&fmt=lrc&charset=utf8`);
+      if (!d?.content) return;
+      const text = cleanLrc(Buffer.from(d.content, "base64").toString("utf8")).split(/\r?\n/).filter((l, i) => !(i === 0 && /^.{1,40}\s-\s.{1,80}$/.test(l.trim()))).join("\n");
+      add("Kugou", { title: x.songname, artist: x.singername, album: x.album_name }, text);
+    }));
+  };
+  const ovh = async () => { const j = await getJson(`https://api.lyrics.ovh/v1/${enc(a)}/${enc(t)}`); add("lyrics.ovh", { title: t, artist: a }, j?.lyrics); };
+
+  await Promise.all([lrclib(), netease(), kugou(), ovh()].map((p) => p.catch(() => {})));
+  // one entry per distinct text; the ones credited to the right artist come first
+  const seenText = new Set();
+  return out
+    .filter((c) => { const k = flat(c.text).slice(0, 240); return seenText.has(k) ? false : seenText.add(k); })
+    .sort((x, y) => Number(y.artistMatch) - Number(x.artistMatch))
+    .slice(0, max)
+    .map((c, i) => ({ id: i, ...c, lines: c.text.split(/\r?\n/).filter((l) => l.trim()).length, preview: firstLines(c.text) }));
+}

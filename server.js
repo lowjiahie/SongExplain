@@ -2,7 +2,7 @@ import express from "express";
 import crypto from "node:crypto";
 import * as db from "./db.js";
 import * as auth from "./auth.js";
-import { fetchLyrics, getJson, looseEq } from "./lyrics.js";
+import { fetchLyrics, lyricCandidates, getJson, looseEq } from "./lyrics.js";
 import { gatherContext, neteasePage, youtubePage, redditPage } from "./context.js";
 import { streamChat, chat, publicProviders, friendlyError } from "./llm.js";
 import { llmConfig, youtubeKey, aiRouter } from "./connections.js";
@@ -376,11 +376,20 @@ app.post("/api/songs/:id/group", (req, res) => {
   const r = k === "reset" ? (db.resetSongGroup(req.user.id, idOf(req)), { ok: true }) : db.setSongGroup(req.user.id, idOf(req), k ? String(k) : null);
   r.error ? bad(res, r.error, r.status) : res.json({ ok: true });
 });
+// "Wrong lyrics?": everything the sources can offer for this song, so the person can pick the right one.
+app.post("/api/songs/:id/lyrics/candidates", viewsLimit, async (req, res) => {
+  const song = db.getSong(req.user.id, idOf(req));
+  if (!song) return bad(res, "Song not found", 404);
+  const current = db.getSongLyrics(req.user.id, song.id) || "";
+  const flatKey = (t) => String(t).toLowerCase().replace(/[\s\p{P}]+/gu, "").slice(0, 240);
+  const list = await lyricCandidates(song.artist, song.title);
+  res.json({ candidates: list.map((c) => ({ ...c, current: !!current && flatKey(c.text) === flatKey(current) })) });
+});
 app.put("/api/songs/:id/lyrics", (req, res) => {
   if (!db.getSong(req.user.id, idOf(req))) return bad(res, "Song not found", 404);
   const lyrics = String(req.body?.lyrics || "");
   if (lyrics.length > 30000) return bad(res, "Lyrics too long");
-  db.setLyrics(req.user.id, idOf(req), lyrics);
+  db.setLyrics(req.user.id, idOf(req), lyrics, req.body?.auto === true); // auto: the text came from one of the online sources, not typed by the owner
   res.json(db.getSong(req.user.id, idOf(req)));
 });
 
@@ -552,6 +561,16 @@ app.post("/api/songs/:id/views/summary", aiLimit, async (req, res) => {
   }
 });
 
+// Keep an explanation that was cut off half-way (the person chose to keep what was written).
+app.post("/api/songs/:id/explanations", (req, res) => {
+  const song = db.getSong(req.user.id, idOf(req));
+  if (!song) return bad(res, "Song not found", 404);
+  const body = String(req.body?.body || "").trim();
+  if (body.length < 20 || body.length > 20000) return bad(res, "Nothing to keep.");
+  const language = AI_LANGS.includes(req.body?.language) ? req.body.language : langOf(req.user);
+  db.addExplanation(song.id, language, "—", "cut off", body + "\n\n> ⚠️ This explanation was cut off before the AI finished.");
+  res.json({ ok: true });
+});
 app.delete("/api/explanations/:id",(req, res) => (db.deleteExplanation(req.user.id, idOf(req)), res.json({ ok: true })));
 
 /* ---------- community: sharing a feeling (opt-in, signed-in people only) ---------- */

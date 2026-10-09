@@ -306,6 +306,18 @@
   .is-busy::before { content:""; display:inline-block; width:11px; height:11px; margin-right:9px; vertical-align:-1px; background:currentColor; animation:pxflip .8s steps(1) infinite }
   @keyframes pxflip { 0% { clip-path:polygon(50% 0,100% 0,100% 100%,0 100%,0 50%,50% 50%) } 25% { clip-path:polygon(0 0,50% 0,50% 50%,100% 50%,100% 100%,0 100%) } 50% { clip-path:polygon(0 0,100% 0,100% 50%,50% 50%,50% 100%,0 100%) } 75% { clip-path:polygon(0 0,100% 0,100% 100%,50% 100%,50% 50%,0 50%) } }
   @media (prefers-reduced-motion:reduce) { .px i, .px i:nth-child(5), .is-busy::before { animation:none !important } .px i:nth-child(odd) { opacity:.6 } }
+  /* listen: one main button, the other platforms in a small menu */
+  .listen { display:flex; align-items:center; gap:8px; flex-wrap:wrap }
+  .listen-split { display:inline-flex; position:relative }
+  .listen-main { display:inline-flex; align-items:center; gap:8px; padding:10px 18px; background:var(--ink); color:var(--bg); border:1px solid var(--ink); font:500 .75rem var(--mono); letter-spacing:.04em; text-decoration:none; cursor:pointer }
+  .listen-main:hover { background:transparent; color:var(--ink) }
+  .listen-menu > summary { list-style:none; display:flex; align-items:center; height:100%; padding:0 12px; background:var(--ink); color:var(--bg); border:1px solid var(--ink); border-left:1px solid var(--bg); cursor:pointer; font:500 .75rem var(--mono) }
+  .listen-menu > summary::-webkit-details-marker { display:none } .listen-menu[open] > summary, .listen-menu > summary:hover { background:transparent; color:var(--ink); border-left-color:var(--ink) }
+  .listen-pop { position:absolute; z-index:30; top:calc(100% + 6px); left:0; min-width:230px; background:var(--bg); border:1px solid var(--rule); box-shadow:6px 6px 0 var(--ink) }
+  .listen-pop a { display:flex; align-items:center; gap:10px; padding:11px 16px; color:var(--ink); font:400 .78rem var(--mono); text-decoration:none; border-bottom:1px solid var(--hair) } .listen-pop a:last-of-type { border-bottom:0 } .listen-pop a:hover { background:var(--ink); color:var(--bg) }
+  .listen-pop a b { margin-left:auto; font-weight:400; opacity:.6 } .listen-pop a i { width:7px; height:7px; background:currentColor; border-radius:50% } .listen-pop a em { width:7px }
+  .listen-pop small { display:block; padding:9px 16px; color:var(--muted); font:400 .66rem/1.5 var(--mono); border-top:1px solid var(--hair) }
+  .listen-prev { padding:10px 14px; background:transparent; color:var(--ink); border:1px solid var(--rule); font:500 .75rem var(--mono); cursor:pointer } .listen-prev:hover, .listen-prev[aria-pressed=true] { background:var(--ink); color:var(--bg) }
   .libfilter { display:flex; gap:14px; align-items:center; max-width:420px; margin:0 0 30px } .libfilter input { flex:1; min-width:0 }
   .mood:hover { color:var(--ink) } .mood[aria-pressed=true] { color:var(--ink); border-bottom-color:var(--rule) }
   /* a feeling is a small memory card: song on top, the words as a quote, feeling words as pills, small print below */

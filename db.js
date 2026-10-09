@@ -138,6 +138,8 @@ if (!hasCol("songs", "lyrics_auto")) {
   db.exec("ALTER TABLE songs ADD COLUMN lyrics_auto INTEGER NOT NULL DEFAULT 0");
   db.exec("UPDATE songs SET lyrics_auto = 1 WHERE lyrics IS NOT NULL AND source = 'catalog'"); // earlier versions fetched them for catalog songs
 }
+// where to listen: a direct page (Apple Music / Deezer) and a 30-second preview, when the catalogue gave them. listen_checked = already looked up.
+for (const [c, def] of [["listen_url", "TEXT"], ["preview_url", "TEXT"], ["listen_checked", "INTEGER NOT NULL DEFAULT 0"]]) if (!hasCol("songs", c)) db.exec(`ALTER TABLE songs ADD COLUMN ${c} ${def}`);
 db.exec("CREATE INDEX IF NOT EXISTS idx_songs_group ON songs(group_key)");
 for (const r of db.prepare("SELECT id, cover, album FROM songs WHERE cover_token IS NULL AND album_key IS NULL").all())
   db.prepare("UPDATE songs SET cover_token = ?, album_key = ? WHERE id = ?").run(coverToken(r.cover), albumKeyOf(r.album), r.id);
@@ -178,21 +180,24 @@ export const deleteUserSessions = (userId) => db.prepare("DELETE FROM sessions W
 export const purgeSessions = () => db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(Date.now());
 
 /* ---------- songs (all scoped by user) ---------- */
-export function upsertSong(userId, { title, artist, album, year, cover, source = "catalog", lyrics }) {
+export function upsertSong(userId, { title, artist, album, year, cover, source = "catalog", lyrics, listenUrl, previewUrl }) {
   const key = songKey(title, artist);
   const found = db.prepare("SELECT * FROM songs WHERE user_id = ? AND key = ?").get(userId, key);
   if (found) {
     if (lyrics?.trim()) db.prepare("UPDATE songs SET lyrics = ?, lyrics_auto = 0 WHERE id = ?").run(lyrics.trim(), found.id);
+    if (listenUrl || previewUrl) db.prepare("UPDATE songs SET listen_url = COALESCE(listen_url, ?), preview_url = COALESCE(preview_url, ?), listen_checked = 1 WHERE id = ?").run(listenUrl || null, previewUrl || null, found.id);
     return getSong(userId, found.id);
   }
   const info = db
-    .prepare("INSERT INTO songs (user_id,key,group_key,cover_token,album_key,title,artist,album,year,cover,source,lyrics) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
-    .run(userId, key, groupKeyOf(title, artist), coverToken(cover), albumKeyOf(album), title, artist, album ?? null, year ?? null, cover ?? null, source, lyrics?.trim() || null);
+    .prepare("INSERT INTO songs (user_id,key,group_key,cover_token,album_key,title,artist,album,year,cover,source,lyrics,listen_url,preview_url,listen_checked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .run(userId, key, groupKeyOf(title, artist), coverToken(cover), albumKeyOf(album), title, artist, album ?? null, year ?? null, cover ?? null, source, lyrics?.trim() || null, listenUrl || null, previewUrl || null, listenUrl || previewUrl ? 1 : 0);
   const id = Number(info.lastInsertRowid);
   autoLink(userId, id);
   return getSong(userId, id);
 }
 
+export const setListenLinks = (userId, id, listenUrl, previewUrl) =>
+  db.prepare("UPDATE songs SET listen_url = COALESCE(listen_url, ?), preview_url = COALESCE(preview_url, ?), listen_checked = 1 WHERE id = ? AND user_id = ?").run(listenUrl || null, previewUrl || null, id, userId);
 export const getSong = (userId, id) => publicSong(db.prepare("SELECT * FROM songs WHERE id = ? AND user_id = ?").get(id, userId));
 export const getSongLyrics = (userId, id) => db.prepare("SELECT lyrics FROM songs WHERE id = ? AND user_id = ?").get(id, userId)?.lyrics || null;
 export const getSongLyricsInfo = (userId, id) => {

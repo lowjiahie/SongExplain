@@ -551,6 +551,13 @@ document.addEventListener("click", async (e) => {
     else if (act === "fimg") await saveFeelingImage(Number(el.dataset.fid));
     else if (act === "lyrsize") { store.set("lyrSize", el.dataset.v); applyLyrSize(); }
     else if (act === "lyrcopy") { await navigator.clipboard.writeText(LYR.text); toast("Lyrics copied"); }
+    else if (act === "prev") {
+      if (PREVIEW) { stopPreview(); return; }
+      const a = new Audio(curSong.preview_url); PREVIEW = a;
+      a.onended = stopPreview; a.onerror = () => { stopPreview(); toast("The preview could not be played.", "err"); };
+      el.textContent = "■ Stop"; el.setAttribute("aria-pressed", "true");
+      a.play().catch(() => { stopPreview(); toast("The preview could not be played.", "err"); });
+    }
     else if (act === "lyredit") showLyrEdit(true);
     else if (act === "lyrsync") {
       if (!curSong.lyrics_auto && !confirm("Sync looks the lyrics up online again and REPLACES the ones saved here — including anything you pasted or edited yourself.\n\nContinue?")) return;
@@ -1007,6 +1014,52 @@ function renderCandidates() {
     `<span class="pinfo">Showing ${from}–${to} of ${items.length}</span>`;
 }
 
+/* ---------- Listen: open the song on a music platform, or hear a 30-second preview ---------- */
+let PREVIEW = null; // the <audio> playing right now
+function stopPreview() { if (PREVIEW) { PREVIEW.pause(); PREVIEW = null; } document.querySelectorAll("[data-act=prev]").forEach((b) => { b.textContent = "▶ 30s"; b.setAttribute("aria-pressed", "false"); }); }
+function listenLinks(song) {
+  const q = encodeURIComponent(`${song.title} ${song.artist}`);
+  const direct = (host) => { try { return new URL(song.listen_url).hostname.endsWith(host) ? song.listen_url : null; } catch { return null; } };
+  return [
+    ["Apple Music", direct("apple.com") || `https://music.apple.com/my/search?term=${q}`, !!direct("apple.com")],
+    ["Spotify", `https://open.spotify.com/search/${q}`, false],
+    ["YouTube Music", `https://music.youtube.com/search?q=${q}`, false],
+    ["YouTube", `https://www.youtube.com/results?search_query=${q}`, false],
+    ["Deezer", direct("deezer.com") || `https://www.deezer.com/search/${q}`, !!direct("deezer.com")],
+    ["网易云", `https://music.163.com/#/search/m/?s=${q}`, false],
+    ["QQ 音乐", `https://y.qq.com/n/ryqq/search?w=${q}`, false],
+  ];
+}
+function renderListen(song) {
+  const box = $("listen");
+  if (!box) return;
+  const links = listenLinks(song);
+  // the main button: the platform you used last; before that, the exact song on Apple/Deezer if we have it, else Spotify
+  const pref = store.get("listenPref");
+  const main = links.find((l) => l[0] === pref) || links.find((l) => l[2]) || links.find((l) => l[0] === "Spotify");
+  const item = ([n, u, d]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" data-listen="${esc(n)}">${d ? "<i></i>" : "<em></em>"}${esc(n)}<b>↗</b></a>`;
+  box.innerHTML = `<span class="listen-split">
+      <a class="listen-main" href="${esc(main[1])}" target="_blank" rel="noopener noreferrer" data-listen="${esc(main[0])}">↗ Listen on ${esc(main[0])}</a>
+      <details class="listen-menu"><summary aria-label="More music platforms" title="More platforms">▾</summary>
+        <div class="listen-pop">${links.map(item).join("")}<small>● opens this exact song · the others search for it. Opens in a new tab.</small></div></details>
+    </span>${song.preview_url ? `<button class="listen-prev" type="button" data-act="prev" aria-pressed="false" title="Hear a 30-second preview here">▶ 30s</button>` : ""}`;
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-listen]");
+  if (a) { store.set("listenPref", a.dataset.listen); const m = a.closest("details"); if (m) m.open = false; setTimeout(() => curSong && renderListen(curSong), 50); return; } // remember the choice
+  document.querySelectorAll(".listen-menu[open]").forEach((d) => { if (!d.contains(e.target)) d.open = false; });      // a click elsewhere closes the menu
+});
+async function loadListen(song) {
+  renderListen(song);
+  if (song.listen_checked) return;
+  try {
+    const d = await json("POST", `/api/songs/${song.id}/listen-links`, {});
+    if (curSong?.id !== song.id) return;
+    song.listen_url = d.url; song.preview_url = d.preview; song.listen_checked = 1;
+    renderListen(song);
+  } catch {}
+}
+
 /* ---------- Song page ---------- */
 let curSong = null;
 let curTab = "explain";
@@ -1348,7 +1401,7 @@ async function renderSong(id) {
           ${song.year ? `<dt>Year</dt><dd>${esc(song.year)}</dd>` : ""}${song.album ? `<dt>Album</dt><dd>${esc(song.album)}</dd>` : ""}
           <dt>Lyrics</dt><dd>${song.hasLyrics ? "saved on this computer, private" : "not saved yet"}</dd>
         </dl>
-        <div class="row"><button class="btn ghost" id="cardbtn">Make a lyric card</button><button class="link danger" id="delsong">Delete song</button></div>
+        <div class="row"><div id="listen" class="listen"></div><button class="btn ghost" id="cardbtn">Make a lyric card</button><button class="link danger" id="delsong">Delete song</button></div>
         <div class="row" style="margin-top:6px"><button class="link" id="simbtn">Same song, different spelling?</button></div>
       </div>
     </header>
@@ -1450,6 +1503,7 @@ async function renderSong(id) {
     t.focus(); t.setSelectionRange(t.value.length, t.value.length);
   };
 
+  loadListen(song);
   $("cardbtn").onclick = () => openCard(song);
   $("delsong").onclick = async () => { if (confirm("Delete this song and everything you saved for it?")) { await json("DELETE", "/api/songs/" + id); toast("Song deleted"); location.hash = "#/"; } };
   setLyricsText(song, "");
@@ -2382,6 +2436,7 @@ async function tourWhenReady(sel) {
 function route() {
   if (!me) { renderAuth(); return; }
   if (ctrl) ctrl.abort(); // leaving the page cancels a running explanation
+  stopPreview();
   if (vctrl) vctrl.abort();
   window.scrollTo(0, 0);
   document.querySelectorAll(".navl a").forEach((x) => x.classList.remove("on"));

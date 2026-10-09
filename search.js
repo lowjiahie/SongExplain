@@ -135,7 +135,7 @@ export function rank(lists, rawQuery) {
       const have = byKey.get(key);
       if (!have) byKey.set(key, { ...c, order: order++, pos: i, srcs: new Set([c.via]), pop: c.pop || 0, bestPos: { [c.via]: i } });
       else {                                   // fill gaps from the duplicate
-        have.cover ||= c.cover; have.year ||= c.year; have.album ||= c.album;
+        have.cover ||= c.cover; have.year ||= c.year; have.album ||= c.album; have.url ||= c.url; have.preview ||= c.preview;
         have.pos = Math.min(have.pos, i); have.srcs.add(c.via); have.bestPos[c.via] = Math.min(have.bestPos[c.via] ?? 1e9, i); have.pop = Math.max(have.pop || 0, c.pop || 0);
         if (c.via === "itunes" && c.cover) have.cover = c.cover; // Apple covers are the sharpest
       }
@@ -149,6 +149,7 @@ export function rank(lists, rawQuery) {
 const norm1 = (r) => ({
   title: r.trackName, artist: r.artistName, album: r.collectionName,
   year: r.releaseDate?.slice(0, 4), cover: r.artworkUrl100?.replace("100x100", "400x400"), via: "itunes",
+  url: r.trackViewUrl, preview: r.previewUrl, // where to listen, and Apple's own 30-second preview
 });
 async function itunes(term, stores, limit = 30) {
   const lists = await Promise.all(stores.map(async (country) => {
@@ -162,6 +163,7 @@ async function deezer(term) {
   return (j?.data || []).map((t) => ({
     title: t.title_short || t.title, artist: t.artist?.name, album: t.album?.title, year: null,
     cover: t.album?.cover_big || t.album?.cover_medium || null, via: "deezer", pop: t.rank || 0,
+    url: t.link, preview: t.preview,
   }));
 }
 async function musicbrainz(term) {

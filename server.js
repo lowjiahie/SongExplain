@@ -2,7 +2,7 @@ import express from "express";
 import crypto from "node:crypto";
 import * as db from "./db.js";
 import * as auth from "./auth.js";
-import { fetchLyrics } from "./lyrics.js";
+import { fetchLyrics, getJson, looseEq } from "./lyrics.js";
 import { gatherContext, neteasePage, youtubePage, redditPage } from "./context.js";
 import { streamChat, chat, publicProviders, friendlyError } from "./llm.js";
 import { llmConfig, youtubeKey, aiRouter } from "./connections.js";
@@ -24,7 +24,7 @@ app.use((_req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.mzstatic.com https://*.dzcdn.net; connect-src 'self'; " +
+      "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.mzstatic.com https://*.dzcdn.net; media-src 'self' https://audio-ssl.itunes.apple.com https://*.mzstatic.com https://*.dzcdn.net; connect-src 'self'; " +
       "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
   );
   if (_req.path.startsWith("/api/")) res.setHeader("Cache-Control", "no-store");
@@ -234,6 +234,11 @@ async function aiQueries(cfg, raw) {
 const MAX_SEARCH_RESULTS = Math.min(100, Math.max(9, Math.floor(Number(process.env.SEARCH_RESULTS) || 54)));
 // Album covers may only come from these CDNs (used for display and for the lyric-card image proxy).
 const COVER_HOSTS = /(^|\.)(mzstatic\.com|dzcdn\.net)$/i;
+// "Listen" links come from the catalogues, but they are only kept if they really point at Apple or Deezer (https), so a
+// crafted request can't store a link to some other site. Previews must come from those catalogues' own audio hosts.
+const LISTEN_HOSTS = /(^|\.)(music\.apple\.com|itunes\.apple\.com|deezer\.com)$/i;
+const PREVIEW_HOSTS = /(^|\.)(audio-ssl\.itunes\.apple\.com|mzstatic\.com|dzcdn\.net)$/i;
+const safeUrl = (u, hosts) => { try { const x = new URL(String(u)); return x.protocol === "https:" && hosts.test(x.hostname) ? x.href : null; } catch { return null; } };
 const safeCover = (u) => {
   try { const x = new URL(String(u || "")); return x.protocol === "https:" && COVER_HOSTS.test(x.hostname) ? x.href : null; } catch { return null; }
 };
@@ -315,7 +320,7 @@ app.get("/api/songs", (req, res) =>
 
 // Create (or find) a song: from a catalog candidate, or manually added with optional lyrics.
 app.post("/api/songs", (req, res) => {
-  const { title, artist, album, year, cover, source, lyrics } = req.body || {};
+  const { title, artist, album, year, cover, source, lyrics, url, preview } = req.body || {};
   if (!String(title || "").trim() || !String(artist || "").trim()) return bad(res, "Title and artist are required");
   if (String(lyrics || "").length > 30000) return bad(res, "Lyrics too long");
   res.json(
@@ -327,8 +332,26 @@ app.post("/api/songs", (req, res) => {
       cover: safeCover(cover),
       source: source === "manual" ? "manual" : "catalog",
       lyrics,
+      listenUrl: safeUrl(url, LISTEN_HOSTS),
+      previewUrl: safeUrl(preview, PREVIEW_HOSTS),
     })
   );
+});
+
+// Songs saved before this feature (or added by hand) have no direct link yet: look the song up once in Apple's catalogue.
+app.post("/api/songs/:id/listen-links", viewsLimit, async (req, res) => {
+  const song = db.getSong(req.user.id, idOf(req));
+  if (!song) return bad(res, "Song not found", 404);
+  if (song.listen_checked) return res.json({ url: song.listen_url, preview: song.preview_url });
+  let hit = null;
+  for (const country of ["MY", "US"]) {
+    const j = await getJson(`https://itunes.apple.com/search?media=music&entity=song&limit=8&country=${country}&term=${encodeURIComponent(`${song.title} ${song.artist}`)}`);
+    hit = (j?.results || []).find((r) => looseEq(r.trackName, song.title) && looseEq(r.artistName, song.artist));
+    if (hit) break;
+  }
+  const url = safeUrl(hit?.trackViewUrl, LISTEN_HOSTS), preview = safeUrl(hit?.previewUrl, PREVIEW_HOSTS);
+  db.setListenLinks(req.user.id, song.id, url, preview); // also remembers that we looked, so this isn't repeated
+  res.json({ url, preview });
 });
 
 app.get("/api/songs/:id", (req, res) => {

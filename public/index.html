@@ -426,6 +426,24 @@
   .cardgrid { columns:2 340px; column-gap:22px } @media (max-width:760px) { .cardgrid { columns:1 } }
   .badge { padding:1px 8px; border:1px solid var(--hair) } .badge.shared { border-color:var(--rule); color:var(--ink) } .badge.warn { border-color:var(--danger); color:var(--danger) }
 
+  .song-acts { display:grid; gap:14px; justify-items:start; margin-top:4px }
+  .acts-row { display:flex; flex-wrap:wrap; gap:10px }
+  .acts-note { margin:-4px 0 0; color:var(--muted); font:400 .72rem/1.6 var(--mono); max-width:46ch }
+  .acts-minor { display:flex; flex-wrap:wrap; gap:6px 22px; padding-top:12px; border-top:1px solid var(--hair); align-self:stretch }
+  /* ---------- Shared page: one card per song, with who shared it and why ---------- */
+  .sh { border-top:1px solid var(--rule); padding:18px 0 22px }
+  .sh-head { display:flex; gap:14px; align-items:center }
+  .sh-head .e-thumb { width:56px; height:56px; flex:none }
+  .sh-head > span { flex:1; min-width:0 } .sh-head b { display:block; font:600 1.05rem var(--display) } .sh-head small { color:var(--muted); font:400 .76rem var(--mono) }
+  .sh-count { color:var(--muted); font:400 .76rem var(--mono); margin-top:2px }
+  .sh-posts { margin:14px 0 0 70px; display:grid; gap:12px }
+  .sh-post { border-left:2px solid var(--hair); padding-left:12px }
+  .sh-who { font:400 .74rem var(--mono); color:var(--muted) } .sh-who b { color:var(--ink) }
+  .sh-why { margin:3px 0 4px; font-size:.92rem; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere }
+  .sh-post .e-tags { margin:4px 0 } .sh-who .you { font:400 .64rem var(--mono); border:1px solid var(--rule); padding:0 6px; color:var(--ink) }
+  @media (max-width:560px) { .sh-posts { margin-left:0 } .sh-head { flex-wrap:wrap } }
+  /* ---------- What's new ---------- */
+  .news-item { padding:12px 0; border-top:1px solid var(--hair) } .news-item h4 { margin:0 0 4px; font:600 .98rem var(--display) } .news-item p { margin:0 0 6px; color:var(--muted); font-size:.88rem; line-height:1.6 }
   /* ---------- dialog & toast ---------- */
   dialog { border:1px solid var(--rule); border-radius:0; padding:0; width:min(520px,92vw); background:var(--bg); color:var(--ink) }
   dialog::backdrop { background:rgba(17,17,16,.5) }
@@ -532,6 +550,7 @@
   <div class="bar">
     <nav class="navl" id="navl" aria-label="Main" style="visibility:hidden">
       <a href="#/" id="navlib">Library</a>
+      <a href="#/shared" id="navshared">Shared</a>
       <a href="#/journal" id="navjournal">Journal</a>
     </nav>
     <button class="wordmark" data-act="home" aria-label="Song Explain — home">
@@ -699,6 +718,11 @@
   <p class="note" id="dupnote"></p>
   <div id="duplist"></div>
   <div class="row" style="margin-top:18px"><button class="btn" id="dupnew" type="button">No, save it as a new song</button><button class="link" id="dupcancel" type="button">Cancel</button></div>
+</div></dialog>
+<dialog id="newsdlg"><div class="dlg">
+  <div class="row"><h3 class="grow">What’s new</h3><button class="link" id="newsclose" type="button">Close</button></div>
+  <div id="newslist"></div>
+  <div class="row" style="margin-top:18px"><button class="btn" id="newsok" type="button">Got it</button></div>
 </div></dialog>
 <dialog id="namedlg"><div class="dlg">
   <div class="row"><h3 class="grow">Choose a display name</h3><button class="link" data-close="namedlg">Close</button></div>

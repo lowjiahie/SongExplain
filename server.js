@@ -657,10 +657,22 @@ app.put("/api/perspectives/:id", publishLimit, (req, res) => {
   db.updatePerspective(req.user.id, idOf(req), p);
   res.json({ ok: true });
 });
+// Share (or stop sharing) just the song on the Shared page. Feelings keep their own private/shared choice.
+app.put("/api/songs/:id/share", publishLimit, (req, res) => {
+  if (!db.getSong(req.user.id, idOf(req))) return bad(res, "Song not found", 404);
+  const on = req.body?.shared === true;
+  if (on && !req.user.display_name) return res.status(409).json({ error: "Choose a display name first — it is what other people will see.", code: "NEED_NAME" });
+  db.setSongShared(req.user.id, idOf(req), on);
+  res.json({ ok: true, shared: on });
+});
 // Everything I have written, across all songs (the "Journal" page). Only ever my own rows.
 app.get("/api/journal", (req, res) => res.json(db.listJournal(req.user.id)));
-app.get("/api/journal/community", viewsLimit, (req, res) => res.json(db.listCommunityFeed(req.user.id, Number(req.query.before) || 0)));
 app.delete("/api/perspectives/:id", (req, res) => (db.deletePerspective(req.user.id, idOf(req)), res.json({ ok: true })));
+
+// Every song people have shared, merged into one card per song (the "Shared" page).
+app.get("/api/shared", viewsLimit, (req, res) =>
+  res.json(db.listSharedSongs(req.user.id, { sort: req.query.sort === "new" ? "new" : "most", offset: Math.max(0, Number(req.query.offset) || 0) }))
+);
 
 // What other people on this app have chosen to share about the same song.
 app.get("/api/songs/:id/community", viewsLimit, (req, res) => {

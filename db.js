@@ -140,6 +140,8 @@ if (!hasCol("songs", "lyrics_auto")) {
 }
 // where to listen: a direct page (Apple Music / Deezer) and a 30-second preview, when the catalogue gave them. listen_checked = already looked up.
 for (const [c, def] of [["listen_url", "TEXT"], ["preview_url", "TEXT"], ["listen_checked", "INTEGER NOT NULL DEFAULT 0"]]) if (!hasCol("songs", c)) db.exec(`ALTER TABLE songs ADD COLUMN ${c} ${def}`);
+// shared_at = the owner chose to share this song on the Shared page (just the song; feelings stay private unless ticked).
+if (!hasCol("songs", "shared_at")) db.exec("ALTER TABLE songs ADD COLUMN shared_at TEXT");
 db.exec("CREATE INDEX IF NOT EXISTS idx_songs_group ON songs(group_key)");
 for (const r of db.prepare("SELECT id, cover, album FROM songs WHERE cover_token IS NULL AND album_key IS NULL").all())
   db.prepare("UPDATE songs SET cover_token = ?, album_key = ? WHERE id = ?").run(coverToken(r.cover), albumKeyOf(r.album), r.id);
@@ -207,6 +209,8 @@ export const getSongLyricsInfo = (userId, id) => {
 // auto = true when the text was fetched online; false when the owner typed or pasted it.
 export const setLyrics = (userId, id, lyrics, auto = false) =>
   db.prepare("UPDATE songs SET lyrics = ?, lyrics_auto = ? WHERE id = ? AND user_id = ?").run(lyrics?.trim() || null, auto && lyrics?.trim() ? 1 : 0, id, userId);
+export const setSongShared = (userId, id, on) =>
+  db.prepare(`UPDATE songs SET shared_at = ${on ? "COALESCE(shared_at, datetime('now'))" : "NULL"} WHERE id = ? AND user_id = ?`).run(id, userId);
 export const deleteSong = (userId, id) => db.prepare("DELETE FROM songs WHERE id = ? AND user_id = ?").run(id, userId);
 
 export const listSongs = (userId) =>
@@ -330,21 +334,54 @@ export function listCommunity(userId, groupKey, beforeId, limit = 20) {
   return { items: rows.slice(0, limit).map((r) => ({ ...r, mine: !!r.mine })), hasMore: rows.length > limit };
 }
 
-// What other people shared about songs that are in MY library (matched by song key). My own posts are not included —
-// they are already in my journal. Returns my copy of the song so each post can link to it.
-export function listCommunityFeed(userId, beforeId, limit = 20) {
-  const rows = db
+// The "Shared" page: every song somebody chose to share, merged by group_key (same song = one card), each with the people
+// who shared it and what they said. Only public, visible posts by people with a display name. Never an email, user id or lyrics.
+export function listSharedSongs(userId, { sort = "most", offset = 0, limit = 12 } = {}) {
+  const order = sort === "new" ? "latest DESC" : "people DESC, latest DESC";
+  // a song is "shared" by a person when they shared the song itself, or published a feeling about it
+  const groups = db
     .prepare(
-      `SELECT p.id, p.body, p.mood, p.anchor, p.design, p.published_at, u.display_name AS author, m.id AS song_id, m.title, m.artist, m.cover
-       FROM perspectives p
-       JOIN songs s ON s.id = p.song_id
-       JOIN users u ON u.id = s.user_id
-       JOIN songs m ON m.user_id = ? AND m.group_key = s.group_key
-       WHERE s.user_id <> ? AND p.is_public = 1 AND p.hidden = 0 AND u.display_name IS NOT NULL ${beforeId ? "AND p.id < ?" : ""}
-       GROUP BY p.id ORDER BY p.id DESC LIMIT ?`
+      `WITH sh AS (
+         SELECT s.group_key AS gk, s.user_id AS uid, p.id AS pid, p.published_at AS ts
+         FROM perspectives p JOIN songs s ON s.id = p.song_id JOIN users u ON u.id = s.user_id
+         WHERE p.is_public = 1 AND p.hidden = 0 AND u.display_name IS NOT NULL AND s.group_key IS NOT NULL
+         UNION ALL
+         SELECT s.group_key, s.user_id, NULL, s.shared_at
+         FROM songs s JOIN users u ON u.id = s.user_id
+         WHERE s.shared_at IS NOT NULL AND u.display_name IS NOT NULL AND s.group_key IS NOT NULL
+       )
+       SELECT gk AS key, COUNT(DISTINCT uid) AS people, COUNT(pid) AS posts, MAX(ts) AS latest
+       FROM sh GROUP BY gk ORDER BY ${order} LIMIT ? OFFSET ?`
     )
-    .all(...[userId, userId, ...(beforeId ? [beforeId] : []), limit + 1]);
-  return { items: rows.slice(0, limit), hasMore: rows.length > limit };
+    .all(limit + 1, offset);
+  const items = groups.slice(0, limit).map((g) => {
+    const song = db
+      .prepare("SELECT title, artist, album, year, cover, source, listen_url, preview_url FROM songs WHERE group_key = ? ORDER BY (cover IS NULL), id DESC LIMIT 1")
+      .get(g.key);
+    const mine = db.prepare("SELECT id FROM songs WHERE user_id = ? AND group_key = ?").get(userId, g.key);
+    const posts = db
+      .prepare(
+        `SELECT p.id, p.body, p.mood, p.anchor, p.published_at, u.display_name AS author, (s.user_id = ?) AS mine
+         FROM perspectives p JOIN songs s ON s.id = p.song_id JOIN users u ON u.id = s.user_id
+         WHERE s.group_key = ? AND p.is_public = 1 AND p.hidden = 0 AND u.display_name IS NOT NULL
+         ORDER BY p.id DESC LIMIT 10`
+      )
+      .all(userId, g.key)
+      .map((r) => ({ ...r, mine: !!r.mine }));
+    // people who shared only the song (no public feeling about it)
+    const songOnly = db
+      .prepare(
+        `SELECT u.display_name AS author, (s.user_id = ?) AS mine FROM songs s JOIN users u ON u.id = s.user_id
+         WHERE s.group_key = ? AND s.shared_at IS NOT NULL AND u.display_name IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM perspectives p JOIN songs s2 ON s2.id = p.song_id
+                           WHERE s2.user_id = s.user_id AND s2.group_key = s.group_key AND p.is_public = 1 AND p.hidden = 0)
+         ORDER BY s.shared_at DESC LIMIT 20`
+      )
+      .all(userId, g.key)
+      .map((r) => ({ ...r, mine: !!r.mine }));
+    return { people: g.people, posts: g.posts, song, mySongId: mine?.id ?? null, items: posts, songOnly };
+  });
+  return { items, hasMore: groups.length > limit };
 }
 
 // Report a public perspective. Three different people reporting hides it until a moderator looks.

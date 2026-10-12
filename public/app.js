@@ -617,7 +617,7 @@ document.addEventListener("click", async (e) => {
     } else if (act === "mhide-post") {
       if (!confirm("Hide this post from the community feed?")) return;
       await json("POST", `/api/admin/perspectives/${el.dataset.id}/hide`, {});
-      COMM.items = COMM.items.filter((p) => p.id !== Number(el.dataset.id)); if (curSong && $("community")) renderCommunity(curSong); if ($("jlist")) journalDrop?.(Number(el.dataset.id)); toast("Hidden");
+      COMM.items = COMM.items.filter((p) => p.id !== Number(el.dataset.id)); if (curSong && $("community")) renderCommunity(curSong); if ($("shlist")) sharedReload?.(); toast("Hidden");
     }
     else if (act === "retest") {
       el.disabled = true; el.textContent = "Testing…";
@@ -835,18 +835,12 @@ async function renderHome() {
 }
 
 /* ---------- Journal: what I wrote, and what others shared about the songs in my library ---------- */
-let journalTab = "mine";
-let journalDrop = null; // lets a moderator "hide" action remove a post from the open journal
 async function renderJournal() {
   $("navjournal").classList.add("on");
   $("view").innerHTML = `<div class="fade">
     <span class="lab">Journal <span id="jcount"></span></span>
     <h1 class="jtitle">Your songs, in your words.</h1>
-    <p class="jintro">A diary of what songs have meant to you — and what other people here felt about the same songs.</p>
-    <div class="seg jseg" role="group" aria-label="Journal view">
-      <button data-jt="mine" aria-pressed="true">My feelings <span id="jn-mine"></span></button>
-      <button data-jt="comm" aria-pressed="false">From the community <span id="jn-comm"></span></button>
-    </div>
+    <p class="jintro">A diary of what songs have meant to you. What other people shared is on the Shared page.</p>
     <p class="note" id="jhelp"></p>
     <div class="jwrite" id="jwrite" hidden></div>
     <section class="jfind" aria-label="Find in your journal">
@@ -864,20 +858,15 @@ async function renderJournal() {
       <button class="link" id="jclear" hidden>clear search and filters</button>
     </section>
     <div id="jlist" class="cardgrid"><p class="note">Loading…</p></div>
-    <div id="jmore"></div>
   </div>`;
-  let songs = [], rows = [], comm = [], hasMore = false;
+  let songs = [], rows = [];
   try {
     [songs, rows] = await Promise.all([json("GET", "/api/songs"), json("GET", "/api/journal")]);
-    const c = await json("GET", "/api/journal/community").catch(() => ({ items: [], hasMore: false }));
-    comm = c.items; hasMore = c.hasMore;
   } catch (e) { toast(e.message, "err"); return; }
   if (!$("jlist")) return;
   const fold = (x) => String(x || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
   let tag = "", songId = "";
-  journalDrop = (id) => { comm = comm.filter((p) => p.id !== id); if ($("jlist")) paint(); };
-
-  const items = () => (journalTab === "mine" ? rows : comm);
+  const items = () => rows;
   const matches = (r) =>
     (!tag || parseTags(r.mood).includes(tag)) && (!songId || String(r.song_id) === songId) &&
     (!$("jq").value.trim() || fold(`${r.body} ${r.title} ${r.artist} ${r.mood} ${r.anchor || ""} ${r.author || ""}`).includes(fold($("jq").value.trim())));
@@ -885,8 +874,6 @@ async function renderJournal() {
   // Start a new feeling: pick one of the songs in the library, jump straight to its "My feelings" tab.
   const writeBox = () => {
     const box = $("jwrite");
-    box.hidden = journalTab !== "mine";
-    if (box.hidden) return;
     box.innerHTML = songs.length
       ? `<label for="wsong">Write a new feeling about</label><select id="wsong">${songs.map((s) => `<option value="${s.id}">${esc(s.title)} — ${esc(s.artist)}</option>`).join("")}</select><button class="btn" id="wgo">Write</button>`
       : `<span>Your library is empty. Add a song first, then come back to write about it.</span><button class="btn" data-act="add">Add a song</button>`;
@@ -905,53 +892,91 @@ async function renderJournal() {
     $("jsong").innerHTML = `<option value="">All songs (${seen.size})</option>` + [...seen.entries()].map(([id, t]) => `<option value="${id}"${id === songId ? " selected" : ""}>${esc(t)}</option>`).join("");
     $("jsong").hidden = seen.size < 2;
   };
-  const entry = (r) => journalTab === "mine"
-    ? entryHTML({
-        song: { id: r.song_id, title: r.title, artist: r.artist, cover: r.cover }, showSong: true, imgAuthor: r.is_public ? me?.displayName || "" : "", design: r.design,
-        body: r.body, mood: r.mood, anchor: r.anchor, date: fmtDate(r.created_at) + (r.updated_at ? " · edited" : ""),
-        badge: r.is_public ? (r.hidden ? ["Hidden by a moderator", "warn"] : ["Shared with the community", "shared"]) : ["Only you can see this", ""],
-        actions: `<a class="link" href="#/song/${r.song_id}">open song</a>`,
-      })
-    : entryHTML({
-        song: { id: r.song_id, title: r.title, artist: r.artist, cover: r.cover }, showSong: true, author: r.author, design: r.design,
-        body: r.body, mood: r.mood, anchor: r.anchor, date: fmtDate(r.published_at),
-        actions: `<button class="link" data-act="report" data-id="${r.id}">report</button>${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${r.id}">hide</button>` : ""}`,
-      });
+  const entry = (r) =>
+    entryHTML({
+      song: { id: r.song_id, title: r.title, artist: r.artist, cover: r.cover }, showSong: true, imgAuthor: r.is_public ? me?.displayName || "" : "", design: r.design,
+      body: r.body, mood: r.mood, anchor: r.anchor, date: fmtDate(r.created_at) + (r.updated_at ? " · edited" : ""),
+      badge: r.is_public ? (r.hidden ? ["Hidden by a moderator", "warn"] : ["Shared with the community", "shared"]) : ["Only you can see this", ""],
+      actions: `<a class="link" href="#/song/${r.song_id}">open song</a>`,
+    });
 
   const empty = (filtered) => {
     if (filtered) return `<div class="empty"><p>Nothing matches those filters.</p><p class="mono">Try a different word, or clear the filters.</p></div>`;
-    if (journalTab === "mine") return `<div class="empty"><p>Your journal is empty — and that’s a good place to start.</p><p class="mono">Choose a song above and write one line. Even a single word counts. Only you will see it unless you choose to share.</p></div>`;
-    if (!songs.length) return `<div class="empty"><p>This page shows what other people felt about songs <i>you</i> have.</p><p class="mono">Your library is empty, so there is nothing to match yet. Add a song to begin.</p></div>`;
-    return `<div class="empty"><p>No one has shared a feeling about your songs yet.</p><p class="mono">Posts appear here only for songs in your library. Add more songs to see more — or be the first: write a feeling and tick “Share”.</p></div>`;
+    return `<div class="empty"><p>Your journal is empty — and that’s a good place to start.</p><p class="mono">Choose a song above and write one line. Even a single word counts. Only you will see it unless you choose to share.</p></div>`;
   };
   const paint = () => {
-    $("jn-mine").textContent = rows.length ? `(${rows.length})` : "";
-    $("jn-comm").textContent = comm.length ? `(${comm.length}${hasMore ? "+" : ""})` : "";
-    document.querySelectorAll("[data-jt]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.jt === journalTab)));
-    $("jhelp").textContent = journalTab === "mine"
-      ? "Everything you have written, newest first. Tap a word to filter by it. Only you can see the ones marked private."
-      : "What other people chose to share — only for songs that are in your library. Be kind; you can report anything that isn’t.";
-    $("jq").placeholder = journalTab === "mine" ? "e.g. rainy, Mum, a song name, an artist…" : "e.g. a song, an artist, a feeling or a name…";
-    $("jqhint").textContent = journalTab === "mine"
-      ? "Looks through the words you wrote, song titles, artists, feeling words and the “About” part. Narrow it down with a song or a feeling word."
-      : "Looks through what others shared: their words, the song, the artist, feeling words, or the person’s name.";
+    $("jhelp").textContent = "Everything you have written, newest first. Tap a word to filter by it. Only you can see the ones marked private.";
+    $("jq").placeholder = "e.g. rainy, Mum, a song name, an artist…";
+    $("jqhint").textContent = "Looks through the words you wrote, song titles, artists, feeling words and the “About” part. Narrow it down with a song or a feeling word.";
     writeBox(); filters();
     const list = items().filter(matches);
     const filtered = !!(tag || songId || $("jq").value.trim());
     $("jclear").hidden = !filtered;
     $("jcount").textContent = filtered ? `(${list.length} of ${items().length})` : "";
     $("jlist").innerHTML = list.length ? list.map(entry).join("") : empty(filtered && items().length > 0);
-    $("jmore").innerHTML = journalTab === "comm" && hasMore && !filtered ? `<div class="row" style="margin-top:22px"><button class="btn ghost" id="jmorebtn">Show more</button></div>` : "";
-    if ($("jmorebtn")) $("jmorebtn").onclick = async () => {
-      try { const c = await json("GET", `/api/journal/community?before=${comm[comm.length - 1].id}`); comm = comm.concat(c.items); hasMore = c.hasMore; paint(); } catch (e) { toast(e.message, "err"); }
-    };
   };
-  document.querySelectorAll("[data-jt]").forEach((b) => (b.onclick = () => { journalTab = b.dataset.jt; tag = ""; songId = ""; $("jq").value = ""; paint(); }));
   $("jtags").onclick = (e) => { const b = e.target.closest(".fw"); if (!b) return; tag = tag === b.dataset.w ? "" : b.dataset.w; paint(); };
   $("jsong").onchange = () => { songId = $("jsong").value; paint(); };
   $("jq").oninput = paint;
   $("jclear").onclick = () => { tag = ""; songId = ""; $("jq").value = ""; paint(); };
   paint();
+}
+
+/* ---------- Shared: every song people chose to share, one card per song (same song = merged) ---------- */
+let sharedSort = "most";
+let sharedReload = null; // lets a moderator "hide" refresh the open Shared page
+async function renderShared() {
+  $("navshared").classList.add("on");
+  $("view").innerHTML = `<div class="fade">
+    <span class="lab">Shared</span>
+    <h1 class="jtitle">Songs people shared.</h1>
+    <p class="jintro">The same song is one card. Underneath: who shared it, and — only if they chose to — why. Feelings stay private unless the writer shared them. Never lyrics.</p>
+    <div class="seg" role="group" aria-label="Sort"><button data-ss="most" aria-pressed="true">Most shared</button><button data-ss="new" aria-pressed="false">Newest</button></div>
+    <div id="shlist"><p class="note">Loading…</p></div><div id="shmore"></div></div>`;
+  let items = [], hasMore = false;
+  const card = (g, i) => {
+    const s = g.song, song = { id: g.mySongId || 0, title: s.title, artist: s.artist, cover: s.cover };
+    const only = g.songOnly.length
+      ? `<div class="sh-post"><div class="sh-who">${g.items.length ? "Also shared the song" : "Shared the song"} · ${g.songOnly.map((o) => `<b>${esc(o.author)}</b>${o.mine ? ` <span class="you">you</span>` : ""}`).join(", ")}</div></div>`
+      : "";
+    const posts = g.items.map((p) => {
+      const tags = parseTags(p.mood);
+      return `<div class="sh-post"><div class="sh-who"><b>${esc(p.author)}</b>${p.mine ? ` <span class="you">you</span>` : ""} · ${esc(fmtDate(p.published_at))}${p.anchor ? ` · About: ${esc(p.anchor)}` : ""}</div>
+        <div class="sh-why">${esc(p.body)}</div>
+        ${tags.length ? `<div class="e-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+        ${p.mine ? "" : `<button class="link" data-act="report" data-id="${p.id}">report</button>`}${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${p.id}">hide</button>` : ""}</div>`;
+    }).join("") + only;
+    return `<article class="sh"><div class="sh-head">${thumbHTML(song)}<span><b>${esc(s.title)}</b><small>${esc(s.artist)}</small>
+        <div class="sh-count">${g.people} ${g.people === 1 ? "person" : "people"} shared${g.posts > g.items.length ? ` · latest ${g.items.length} shown` : ""}</div></span>
+        ${g.mySongId ? `<a class="btn ghost" href="#/song/${g.mySongId}">Open</a>` : `<button class="btn ghost" data-shadd="${i}">Add to my library</button>`}</div>
+      <div class="sh-posts">${posts}</div></article>`;
+  };
+  const paint = () => {
+    document.querySelectorAll("[data-ss]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.ss === sharedSort)));
+    $("shlist").innerHTML = items.length ? items.map(card).join("")
+      : `<div class="empty"><p>Nothing has been shared yet.</p><p class="mono">Be the first: open a song and tap “Share this song”. Add a feeling too if you want to say why — that part is optional.</p></div>`;
+    $("shmore").innerHTML = hasMore ? `<div class="row" style="margin-top:22px"><button class="btn ghost" id="shmorebtn">Show more</button></div>` : "";
+    if ($("shmorebtn")) $("shmorebtn").onclick = () => load(true);
+  };
+  const load = async (more) => {
+    try {
+      const d = await json("GET", `/api/shared?sort=${sharedSort}&offset=${more ? items.length : 0}`);
+      items = more ? items.concat(d.items) : d.items; hasMore = d.hasMore;
+      if ($("shlist")) paint();
+    } catch (e) { toast(e.message, "err"); }
+  };
+  document.querySelectorAll("[data-ss]").forEach((b) => (b.onclick = () => { sharedSort = b.dataset.ss; load(false); }));
+  $("shlist").onclick = async (e) => {
+    const b = e.target.closest("[data-shadd]"); if (!b) return;
+    const g = items[Number(b.dataset.shadd)]; if (!g) return;
+    const { title, artist, album, year, cover, source, listen_url, preview_url } = g.song;
+    try {
+      const s = await saveSong({ title, artist, album, year, cover, source, url: listen_url, preview: preview_url });
+      if (s) { toast("Added to your library"); g.mySongId = s.id; paint(); }
+    } catch (err) { toast(err.message, "err"); }
+  };
+  sharedReload = () => { if ($("shlist")) load(false); };
+  await load(false);
 }
 
 // Searching has its own page (#/search/<query>), so results never get mixed up with your library.
@@ -1578,8 +1603,15 @@ async function renderSong(id) {
           ${song.year ? `<dt>Year</dt><dd>${esc(song.year)}</dd>` : ""}${song.album ? `<dt>Album</dt><dd>${esc(song.album)}</dd>` : ""}
           <dt>Lyrics</dt><dd>${song.hasLyrics ? "saved on this computer, private" : "not saved yet"}</dd>
         </dl>
-        <div class="row"><div id="listen" class="listen"></div><button class="btn ghost" id="cardbtn">Make a lyric card</button><button class="link danger" id="delsong">Delete song</button></div>
-        <div class="row" style="margin-top:6px"><button class="link" id="simbtn">Same song, different spelling?</button></div>
+        <div class="song-acts">
+          <div id="listen" class="listen"></div>
+          <div class="acts-row">
+            <button class="btn ghost" id="sharebtn" type="button" aria-pressed="false"></button>
+            <button class="btn ghost" id="cardbtn" type="button">Make a lyric card</button>
+          </div>
+          <p class="acts-note" id="sharenote"></p>
+          <div class="acts-minor"><button class="link" id="simbtn" type="button">Same song, different spelling?</button><button class="link danger" id="delsong" type="button">Delete song</button></div>
+        </div>
       </div>
     </header>
 
@@ -1702,6 +1734,24 @@ async function renderSong(id) {
   if (!store.get("toured_song") && store.get("toured")) tourWhenReady("#exlist .empty, #exlist .article").then(() => { if (curSong === song) startTour(); });
   loadViews(song);
   $("simbtn").onclick = () => checkSimilar(song, true);
+  const paintShare = () => {
+    const on = !!song.shared_at;
+    $("sharebtn").textContent = on ? "✓ You shared this song" : "Share this song";
+    $("sharebtn").classList.toggle("ghost", !on);
+    $("sharebtn").setAttribute("aria-pressed", String(on));
+    $("sharenote").textContent = on
+      ? "Visible on the Shared page. Tap the button again to stop sharing. Your feelings stay private unless you tick Share on them."
+      : "Puts just the song on the Shared page. Your feelings stay private.";
+  };
+  paintShare();
+  $("sharebtn").onclick = async () => {
+    const on = !song.shared_at;
+    try {
+      await sendPerspective("PUT", `/api/songs/${song.id}/share`, { shared: on });
+      song.shared_at = on ? new Date().toISOString() : null; paintShare();
+      toast(on ? "Shared — people can now see this song on the Shared page" : "No longer shared");
+    } catch (e) { toast(e.message, "err"); }
+  };
   checkSimilar(song, false);
 
   // saved explanations: newest in full, older versions folded away
@@ -2601,7 +2651,8 @@ const HOME_TOUR = [
   { sel: '.hint [data-act="add"]', t: "Can't find it?", b: "Add a new or indie song by hand — title, artist, and lyrics if you have them. Lyrics stay private to you." },
   { sel: ".libhead", t: "Your Library", b: "Every song you open is kept here. Tap a card to come back to its explanation and your notes." },
   { sel: "#libfilter", t: "Filter your Library", b: "Narrow your own songs by title or artist. This only looks at songs you already have." },
-  { sel: "#navjournal", t: "Journal", b: "Everything you wrote about songs in one place, plus feelings other members shared about the songs in your Library." },
+  { sel: "#navshared", t: "Shared", b: "Every song members shared, one card per song, with who shared it and why. Add one to your Library with a tap." },
+  { sel: "#navjournal", t: "Journal", b: "Everything you wrote about songs in one place, and what other members shared lives on the Shared page." },
   { sel: "#aipill", t: "Connect an AI — once", b: "The explanations are written by an AI you connect with your own key. Pick a provider, paste the key, press Test & connect." },
   { sel: "#acct", t: "Account", b: "Your display name, the language explanations are written in, an AI model, your data, and sign out." },
   { sel: '.foot [data-act="feedback"]', t: "Send feedback", b: "Found a bug or have an idea? Tell us here, at the bottom of every page. It goes privately to the person running the app. Open a song and tap Guide again for the song tour." },
@@ -2629,17 +2680,17 @@ const SONG_TOUR = [
 
 let TOUR = null;
 const tourVis = (el) => !!el && el.getClientRects().length > 0;
-function startTour() {
+function startTour(custom) {
   if (TOUR) return;
-  const onSong = /^#\/song\/\d+/.test(location.hash) && !!$("explain");
+  const onSong = !custom && /^#\/song\/\d+/.test(location.hash) && !!$("explain");
   const prevTab = curTab;
-  const steps = (onSong ? SONG_TOUR : HOME_TOUR).filter((st) => {
+  const steps = (custom || (onSong ? SONG_TOUR : HOME_TOUR)).filter((st) => {
     if (st.tab) showTab(st.tab);
     return tourVis(document.querySelector(st.sel));
   });
   if (onSong) showTab(prevTab);
   if (!steps.length) return;
-  store.set(onSong ? "toured_song" : "toured", "1");
+  if (!custom) store.set(onSong ? "toured_song" : "toured", "1");
   const back = document.createElement("div"); back.className = "tour-back";
   const hole = document.createElement("div"); hole.className = "tour-hole";
   const pop = document.createElement("div"); pop.className = "tour-pop"; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-live", "polite");
@@ -2707,6 +2758,31 @@ async function tourWhenReady(sel) {
   await new Promise((r) => setTimeout(r, 400));
 }
 
+/* ---------- What's new: shown once per new entry. Add the newest item at the END of the list with the next id. ---------- */
+const CHANGELOG = [
+  { id: 1, title: "Shared — songs people shared", body: "A new page with every song members shared. The same song is one card, with who shared it and, if they chose, why. On any song, tap “Share this song” to share just the song — your feelings stay private.", go: "#/shared", sel: "#navshared" },
+];
+function showNews() {
+  const latest = CHANGELOG[CHANGELOG.length - 1]?.id || 0;
+  const raw = store.get("news_seen");
+  if (raw === null && !store.get("toured")) { store.set("news_seen", String(latest)); return; } // a brand-new person: the tour covers it
+  const seen = Number(raw || 0);
+  const fresh = CHANGELOG.filter((n) => n.id > seen);
+  if (!fresh.length) return;
+  $("newslist").innerHTML = fresh.slice().reverse().map((n) => `<div class="news-item"><h4>${esc(n.title)}</h4><p>${esc(n.body)}</p>${n.go ? `<button class="link" data-news="${n.id}" type="button">Show me</button>` : ""}</div>`).join("");
+  const done = () => { store.set("news_seen", String(latest)); if ($("newsdlg").open) $("newsdlg").close(); };
+  $("newsok").onclick = done; $("newsclose").onclick = done; $("newsdlg").oncancel = done;
+  $("newslist").onclick = async (e) => {
+    const b = e.target.closest("[data-news]"); if (!b) return;
+    const n = CHANGELOG.find((x) => x.id === Number(b.dataset.news)); if (!n) return;
+    done();
+    if (location.hash !== n.go) location.hash = n.go;
+    await tourWhenReady(n.sel);
+    startTour([{ sel: n.sel, t: n.title, b: n.body }]);
+  };
+  $("newsdlg").showModal();
+}
+
 /* ---------- router ---------- */
 function route() {
   if (!me) { renderAuth(); return; }
@@ -2717,6 +2793,7 @@ function route() {
   document.querySelectorAll(".navl a").forEach((x) => x.classList.remove("on"));
   const open = (p) => { const end = busy("Opening"); Promise.resolve(p).finally(end); };
   if (location.hash === "#/journal") { curTab = "explain"; open(renderJournal()); return; }
+  if (location.hash === "#/shared") { curTab = "explain"; open(renderShared()); return; }
   const sm = location.hash.match(/^#\/search\/(.+)$/);
   if (sm) { curTab = "explain"; let q = sm[1]; try { q = decodeURIComponent(q); } catch {} renderSearch(q); return; }
   const m = location.hash.match(/^#\/song\/(\d+)/);
@@ -2734,4 +2811,5 @@ window.addEventListener("hashchange", route);
   if (me) await initAI();
   route();
   if (me && !store.get("toured") && !/^#\/song\//.test(location.hash)) { await tourWhenReady("#lib .item, #lib .empty"); startTour(); } // first visit: show the home tour once
+  else if (me) showNews();
 })();

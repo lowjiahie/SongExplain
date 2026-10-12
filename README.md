@@ -17,6 +17,24 @@ Free and bring-your-own-key: every person connects their own AI account, so the 
 - **Lyric cards** — turn a few lines or your own words into an image to share.
 - **What's new** — a one-time popup that points to new features after an update.
 
+## Preview
+
+<p align="center">
+  <img src="docs/promo/promo-1.png" width="30%" alt="Song Explain: every song, heard differently">
+  <img src="docs/promo/promo-2.png" width="30%" alt="AI explains what the song is saying">
+  <img src="docs/promo/promo-3.png" width="30%" alt="Write your feelings, private or shared">
+</p>
+<p align="center">
+  <img src="docs/promo/promo-4.png" width="30%" alt="See how other people feel about the same song">
+  <img src="docs/promo/promo-5.png" width="30%" alt="One feeling, many card styles">
+  <img src="docs/promo/promo-6.png" width="30%" alt="Journal: your lyric diary">
+</p>
+<p align="center">
+  <img src="docs/promo/promo-7.png" width="30%" alt="Turn lyrics into a shareable card">
+</p>
+
+<sub>Promo cards (in Chinese). The songs and notes shown are original demo content.</sub>
+
 ## Quick start
 
 Requires Node.js 22 or newer (it uses the built-in SQLite).

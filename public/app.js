@@ -923,6 +923,10 @@ async function renderJournal() {
 }
 
 /* ---------- Shared: every song people chose to share, one card per song (same song = merged) ---------- */
+// Under someone else's shared feeling: admins get "hide" (no report needed), everyone else gets "report".
+const modActions = (p) => p.mine ? "" : me?.isAdmin
+  ? `<span class="acts-links"><button class="link danger" data-act="mhide-post" data-id="${p.id}">hide</button></span>`
+  : `<span class="acts-links"><button class="link" data-act="report" data-id="${p.id}">report</button></span>`;
 let sharedSort = "most";
 let sharedReload = null; // lets a moderator "hide" refresh the open Shared page
 async function renderShared() {
@@ -944,7 +948,7 @@ async function renderShared() {
       return `<div class="sh-post"><div class="sh-who"><b>${esc(p.author)}</b>${p.mine ? ` <span class="you">you</span>` : ""} · ${esc(fmtDate(p.published_at))}${p.anchor ? ` · About: ${esc(p.anchor)}` : ""}</div>
         <div class="sh-why">${esc(p.body)}</div>
         ${tags.length ? `<div class="e-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
-        ${p.mine ? "" : `<button class="link" data-act="report" data-id="${p.id}">report</button>`}${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${p.id}">hide</button>` : ""}</div>`;
+        ${modActions(p)}</div>`;
     }).join("") + only;
     return `<article class="sh"><div class="sh-head">${thumbHTML(song)}<span><b>${esc(s.title)}</b><small>${esc(s.artist)}</small>
         <div class="sh-count">${g.people} ${g.people === 1 ? "person" : "people"} shared${g.posts > g.items.length ? ` · latest ${g.items.length} shown` : ""}</div></span>
@@ -1653,6 +1657,12 @@ async function renderSong(id) {
       <div class="tagadd"><input id="ptag" type="text" maxlength="40" placeholder="Or type your own word, then press Enter — e.g. bittersweet, 想家" autocomplete="off" aria-label="Add your own feeling word"><button type="button" class="btn ghost sm" id="ptagadd">Add</button><span class="mono note" id="tagcount" style="margin:0"></span></div>
       <div class="field"><input id="panchor" type="text" placeholder="About which part? e.g. Chorus, Verse 2 (optional)"></div>
       <div class="field"><textarea id="pbody" placeholder="Anything at all — a memory, a person, a moment, or just one word. Your own words, not the song's."></textarea></div>
+      <div class="ptools">
+        <button type="button" class="btn ghost sm" id="ppolish">✨ Polish with AI</button>
+        <button type="button" class="btn ghost sm" id="plyric">♪ Add a lyric line</button>
+        <button type="button" class="link" id="prestore" hidden>↶ Restore my original</button>
+      </div>
+      <div class="ppanel" id="ppanel" hidden aria-live="polite"></div>
       <p class="pcount mono" id="pcount"></p>
       <div class="prompts"><span class="mono">Not sure where to start?</span>${PROMPTS.map((t) => `<button type="button" class="link" data-prompt="${esc(t)}">${esc(t)}</button>`).join("")}</div>
       <input type="hidden" id="pdesign">
@@ -1703,6 +1713,7 @@ async function renderSong(id) {
   ["pbody", "panchor"].forEach((x) => ($(x).oninput = renderPreview));
   $("ppublic").onchange = renderPreview;
   $("pbody").addEventListener("input", () => updateCount());
+  setupFeelingTools(song);
   $("ppublic").addEventListener("change", () => updateCount());
   $("moods").onclick = (e) => { const b = e.target.closest(".mood"); if (b) toggleTag(b.dataset.mood); };
   $("ptagadd").onclick = addCustomTags;
@@ -1795,7 +1806,7 @@ async function renderSong(id) {
       } catch (e) { toast(e.message, "err"); }
     };
     el.querySelector("[data-edit]").onclick = () => {
-      setMood(p.mood || ""); $("panchor").value = p.anchor || ""; $("pbody").value = p.body; $("ppublic").checked = !!p.is_public; setDesign(p.design || "paper");
+      setMood(p.mood || ""); $("panchor").value = p.anchor || ""; $("pbody").value = p.body; $("pbody").dispatchEvent(new Event("pbody-reset")); $("ppublic").checked = !!p.is_public; setDesign(p.design || "paper");
       $("padd").textContent = "Update"; $("pcancel").hidden = false;
       $("pcancel").onclick = () => renderSong(id);
       $("padd").onclick = async () => {
@@ -1871,7 +1882,7 @@ function renderCommunity(song) {
   box.innerHTML = COMM.items.map((p) => entryHTML({
       song, author: p.author, you: p.mine, design: p.design,
       body: p.body, mood: p.mood, anchor: p.anchor, date: fmtDate(p.published_at),
-      actions: `${p.mine ? "" : `<button class="link" data-act="report" data-id="${p.id}">report</button>`}${me?.isAdmin ? `<button class="link danger" data-act="mhide-post" data-id="${p.id}">hide</button>` : ""}`,
+      actions: modActions(p),
     })).join("") +
     (COMM.hasMore ? `<div class="row" style="margin-top:22px"><button class="btn ghost" id="commmore">Show more</button></div>` : "");
   if ($("commmore")) $("commmore").onclick = () => loadCommunity(song, true);
@@ -2149,6 +2160,166 @@ async function summarizeViews(song) {
     if (vctrl === mine) vctrl = null;
     if ($("vsum")) { $("vsum").textContent = "Summarize what listeners feel"; $("vsum").classList.remove("stop"); }
   }
+}
+
+
+/* ---------- helpers under the feeling box: Polish with AI, and Add a lyric line ----------
+   Nothing is ever written into the box without a clear tap, and every change can be undone ("Restore my original"). */
+function setupFeelingTools(song) {
+  const ta = $("pbody"), panel = $("ppanel");
+  const hist = []; // earlier versions of the box, newest last (at most 3)
+  let polishCtl = null, tone = "voice", lyr = null, picked = [];
+  const note = () => ta.dispatchEvent(new Event("input", { bubbles: true }));
+  const syncRestore = () => { $("prestore").hidden = !hist.length; };
+  const closePanel = () => { if (polishCtl) { polishCtl.abort(); polishCtl = null; } panel.hidden = true; panel.innerHTML = ""; };
+  // the one place the box changes: remember the old text first so it can always be brought back
+  const apply = (value, undoMsg) => {
+    hist.push(ta.value); if (hist.length > 3) hist.shift();
+    ta.value = value; note(); syncRestore(); ta.focus();
+    toast(undoMsg + " — “Restore my original” brings it back");
+  };
+  $("prestore").onclick = () => {
+    if (!hist.length) return;
+    ta.value = hist.pop(); note(); syncRestore(); closePanel(); toast("Restored");
+  };
+  // fresh form (saved / cancelled / editing another): forget everything
+  ta.addEventListener("pbody-reset", () => { hist.length = 0; syncRestore(); closePanel(); });
+
+  /* ---- Polish ---- */
+  const polishUI = (state) => {
+    const toneSeg = `<div class="seg" role="group" aria-label="Style">${[["voice", "Keep my voice"], ["poetic", "More poetic"], ["short", "Shorter"]]
+      .map(([k, t]) => `<button type="button" data-tone="${k}" aria-pressed="${k === tone}">${t}</button>`).join("")}</div>`;
+    if (state.busy) panel.innerHTML = `<div class="pp-head"><span class="mono">Polishing…</span><button class="link" data-pp="close" type="button">Cancel</button></div>${toneSeg}`;
+    else if (state.live != null) panel.innerHTML = `<div class="pp-head"><span class="mono">Polishing… you can use it once it finishes.</span><button class="link" data-pp="close" type="button">Cancel</button></div>
+      <div class="pp-cols"><div><span class="mono">Yours</span><p>${esc(state.orig)}</p></div><div><span class="mono">Suggestion</span><p>${esc(state.live)}</p></div></div>`;
+    else if (state.err) panel.innerHTML = `<div class="pp-head"><span class="mono">Couldn’t polish this time — your text is untouched.</span><button class="link" data-pp="close" type="button">Close</button></div><p class="note err">${esc(state.err)}</p>${toneSeg}<div class="row"><button class="btn sm" data-pp="again" type="button">Try again</button></div>`;
+    else panel.innerHTML = `<div class="pp-head"><span class="mono">Suggestion — nothing changes until you tap “Use this”.</span><button class="link" data-pp="close" type="button">Close</button></div>
+      <div class="pp-cols"><div><span class="mono">Yours</span><p>${esc(state.orig)}</p></div><div><span class="mono">Suggestion</span><p>${esc(state.text)}</p></div></div>
+      ${state.changed ? "" : `<p class="note">The AI thinks this already reads well.</p>`}${toneSeg}
+      <div class="row"><button class="btn sm" data-pp="use" type="button"${state.changed ? "" : " disabled"}>Use this</button><button class="btn ghost sm" data-pp="again" type="button">Polish again</button><button class="link" data-pp="close" type="button">Keep mine</button></div>`;
+    panel.hidden = false;
+  };
+  let sugg = null;
+  const made = new Map(); // style -> the suggestion already made for the current text, so switching back and forth costs nothing
+  const runPolish = async () => {
+    const orig = ta.value.trim();
+    if ([...orig].length < 5) return toast("Write a little more first — at least a few words.", "err");
+    if (!hasAI()) { toast("Connect an AI first (AI settings, top right).", "err"); return; }
+    if (polishCtl) polishCtl.abort();
+    const mine = (polishCtl = new AbortController());
+    sugg = null; polishUI({ busy: true });
+    try {
+      const r = await api("POST", `/api/songs/${song.id}/polish`, { text: orig, tone }, mine.signal);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "The AI did not return an answer.");
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let got = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        got += dec.decode(value, { stream: true });
+        if (polishCtl !== mine) return;
+        const cut = got.indexOf("\u0000");
+        polishUI({ live: cut >= 0 ? got.slice(0, cut) : got, orig });
+      }
+      if (polishCtl !== mine) return;
+      const k = got.indexOf("\u0000");
+      const body = (k >= 0 ? got.slice(0, k) : got).trim();
+      const tail = k >= 0 ? got.slice(k + 1) : "";
+      if (tail.startsWith("ERR:")) throw new Error(tail.slice(4) || "The AI did not return an answer.");
+      if (tail !== "OK") throw new Error("The connection was cut off before the AI finished. Nothing was changed.");
+      if (!body) throw new Error("The AI returned an empty answer.");
+      sugg = { orig, text: body, changed: body !== orig };
+      made.set(tone, sugg);
+      polishUI(sugg);
+    } catch (e) {
+      if (e.name === "AbortError" || polishCtl !== mine) return;
+      polishUI({ err: e.message || "Something went wrong." });
+    } finally { if (polishCtl === mine) polishCtl = null; }
+  };
+  $("ppolish").onclick = runPolish;
+
+  /* ---- Lyric line picker ---- */
+  const lyricUI = () => {
+    if (!lyr) { panel.innerHTML = `<p class="note">Loading lyrics…</p>`; panel.hidden = false; return; }
+    if (!lyr.length) {
+      panel.innerHTML = `<div class="pp-head"><span class="mono">No lyrics are saved for this song yet.</span><button class="link" data-pp="close" type="button">Close</button></div>
+        <div class="row"><button class="btn ghost sm" data-pp="findlyr" type="button">Find lyrics online</button><button class="link" data-pp="tolyr" type="button">Paste my own</button></div>`;
+    } else {
+      panel.innerHTML = `<div class="pp-head"><span class="mono">Tap the lines you want to add</span><button class="link" data-pp="close" type="button">Close</button></div>
+        <div class="lines">${lyr.map((l, i) => `<button type="button" class="line" data-li="${i}" aria-pressed="${picked.includes(i)}">${esc(l)}</button>`).join("")}</div>
+        <div class="row"><button class="btn sm" data-pp="insert" type="button">Insert</button><span class="note" id="lpinfo" style="margin:0"></span></div>`;
+      pickInfo();
+    }
+    panel.hidden = false;
+  };
+  // How long the note would become, against the limit for what is being saved (shared feelings are shorter).
+  const pickText = () => `“${picked.map((i) => lyr[i]).join(" / ")}” `;
+  const pickInfo = () => {
+    const info = $("lpinfo"), btn = panel.querySelector('[data-pp="insert"]');
+    if (!info || !btn) return;
+    const pub = $("ppublic").checked, limit = pub ? 1500 : 5000;
+    const total = [...ta.value].length + (picked.length ? [...pickText()].length : 0);
+    const over = total > limit;
+    btn.disabled = over || !picked.length;
+    info.classList.toggle("err", over);
+    if (over) info.textContent = `${picked.length} line${picked.length === 1 ? "" : "s"} chosen — that makes ${total} characters, over the ${limit} limit${pub ? " for shared feelings" : ""}. Choose fewer lines${pub ? ", or untick Share" : ""}.`;
+    else if (pub && picked.length >= 3) info.textContent = `${picked.length} lines chosen · ${total} / ${limit}. Heads up: a shared feeling can’t quote 3 or more lines — save it private, or choose fewer.`;
+    else info.textContent = picked.length ? `${picked.length} line${picked.length === 1 ? "" : "s"} chosen · ${total} / ${limit} characters` : `Tap a line to choose it · ${total} / ${limit} characters so far`;
+  };
+  const openLyrics = async (find) => {
+    if (polishCtl) { polishCtl.abort(); polishCtl = null; }
+    picked = []; lyr = null; lyricUI();
+    try {
+      const d = find ? await json("POST", `/api/songs/${song.id}/lyrics/find`, {}) : await json("GET", `/api/songs/${song.id}/lyrics`);
+      lyr = String(d.lyrics || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 400);
+    } catch (e) { lyr = []; if (find) toast(e.message, "err"); }
+    if (!panel.hidden) lyricUI();
+  };
+  $("plyric").onclick = () => openLyrics(false);
+  $("ppublic").addEventListener("change", pickInfo);
+
+  panel.addEventListener("click", async (e) => {
+    const li = e.target.closest("[data-li]");
+    if (li) {
+      const i = Number(li.dataset.li);
+      if (picked.includes(i)) picked = picked.filter((x) => x !== i);
+      else picked = [...picked, i].sort((a, b) => a - b);
+      li.setAttribute("aria-pressed", String(picked.includes(i)));
+      pickInfo();
+      return;
+    }
+    const tb = e.target.closest("[data-tone]");
+    if (tb) {
+      tone = tb.dataset.tone;
+      panel.querySelectorAll("[data-tone]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tone === tone)));
+      // a style that was already made for this exact text is just shown again; a new style is made once; "Polish again" always makes a fresh one
+      const have = made.get(tone);
+      if (have && have.orig === ta.value.trim()) { if (polishCtl) { polishCtl.abort(); polishCtl = null; } sugg = have; polishUI(have); }
+      else if (!panel.hidden) runPolish();
+      return;
+    }
+    const a = e.target.closest("[data-pp]")?.dataset.pp;
+    if (!a) return;
+    if (a === "close") closePanel();
+    else if (a === "again") runPolish();
+    else if (a === "use") {
+      if (!sugg) return;
+      if (ta.value.trim() !== sugg.orig) { toast("Your text changed while polishing — tap Try again.", "err"); return; }
+      const t = sugg.text; sugg = null; closePanel(); apply(t, "Replaced with the polished version");
+    } else if (a === "insert") {
+      if (!picked.length) return toast("Tap a line first.", "err");
+      const q = pickText();
+      if ([...ta.value].length + [...q].length > ($("ppublic").checked ? 1500 : 5000)) return pickInfo();
+      const pos = ta.selectionStart ?? ta.value.length, before = ta.value.slice(0, pos), after = ta.value.slice(pos);
+      const lead = before && !/\s$/.test(before) ? "\n\n" : "";
+      closePanel();
+      hist.push(ta.value); if (hist.length > 3) hist.shift();
+      ta.value = before + lead + q + after;
+      const at = (before + lead + q).length;
+      note(); syncRestore(); ta.focus(); ta.setSelectionRange(at, at);
+    } else if (a === "findlyr") { $("ppanel").querySelector('[data-pp="findlyr"]').disabled = true; await openLyrics(true); }
+    else if (a === "tolyr") { closePanel(); showTab("lyrics"); }
+  });
 }
 
 /* ---------- Explain ---------- */

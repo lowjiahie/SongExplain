@@ -440,8 +440,20 @@
   .sh-post { border-left:2px solid var(--hair); padding-left:12px }
   .sh-who { font:400 .74rem var(--mono); color:var(--muted) } .sh-who b { color:var(--ink) }
   .sh-why { margin:3px 0 4px; font-size:.92rem; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere }
-  .sh-post .e-tags { margin:4px 0 } .sh-who .you { font:400 .64rem var(--mono); border:1px solid var(--rule); padding:0 6px; color:var(--ink) }
+  .sh-post .e-tags { margin:4px 0 }
+  .acts-links { display:inline-flex; gap:16px } .sh-who .you { font:400 .64rem var(--mono); border:1px solid var(--rule); padding:0 6px; color:var(--ink) }
   @media (max-width:560px) { .sh-posts { margin-left:0 } .sh-head { flex-wrap:wrap } }
+  /* ---------- tools under the feeling box ---------- */
+  .ptools { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; margin:10px 0 0 }
+  .btn.sm { padding:7px 14px; font-size:.72rem }
+  .ppanel { border:1px solid var(--rule); padding:14px 16px; margin:12px 0 0; display:grid; gap:12px }
+  .pp-head { display:flex; justify-content:space-between; gap:12px; align-items:baseline; color:var(--muted) }
+  .pp-cols { display:grid; grid-template-columns:1fr 1fr; gap:14px }
+  .pp-cols > div { min-width:0; border-top:1px solid var(--hair); padding-top:8px }
+  .pp-cols p { margin:6px 0 0; font-size:.92rem; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere }
+  .pp-cols > div:last-child { border-top-color:var(--ink) }
+  .ppanel .lines { margin-top:0 }
+  @media (max-width:640px) { .pp-cols { grid-template-columns:1fr } }
   /* ---------- What's new ---------- */
   .news-item { padding:12px 0; border-top:1px solid var(--hair) } .news-item h4 { margin:0 0 4px; font:600 .98rem var(--display) } .news-item p { margin:0 0 6px; color:var(--muted); font-size:.88rem; line-height:1.6 }
   /* ---------- dialog & toast ---------- */
